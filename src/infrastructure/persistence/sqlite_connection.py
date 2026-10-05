@@ -43,6 +43,9 @@ SCHEMA_STATEMENTS = (
         region TEXT,
         decision_mode TEXT NOT NULL,
         keyword_rules_json TEXT NOT NULL,
+        required_keywords_json TEXT NOT NULL DEFAULT '[]',
+        optional_keywords_json TEXT NOT NULL DEFAULT '[]',
+        optional_min_hits INTEGER,
         is_running INTEGER NOT NULL
     )
     """,
@@ -143,6 +146,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     for statement in SCHEMA_STATEMENTS:
         conn.execute(statement)
     _migrate_result_items_status(conn)
+    _migrate_task_keyword_columns(conn)
     conn.commit()
 
 
@@ -164,6 +168,29 @@ def _migrate_result_items_status(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_results_filename_status_crawl"
         " ON result_items(result_filename, status, crawl_time DESC)"
+    )
+
+
+def _migrate_task_keyword_columns(conn: sqlite3.Connection) -> None:
+    """为 tasks 表添加双组关键词列（仅执行一次，兼容旧库）。"""
+    row = conn.execute(
+        "SELECT value FROM app_metadata WHERE key = 'migration:task_keyword_columns'"
+    ).fetchone()
+    if row is not None:
+        return
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "required_keywords_json" not in cols:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN required_keywords_json TEXT NOT NULL DEFAULT '[]'"
+        )
+    if "optional_keywords_json" not in cols:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN optional_keywords_json TEXT NOT NULL DEFAULT '[]'"
+        )
+    if "optional_min_hits" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN optional_min_hits INTEGER")
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_keyword_columns', 'done')"
     )
 
 

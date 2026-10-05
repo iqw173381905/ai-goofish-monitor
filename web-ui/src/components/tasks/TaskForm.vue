@@ -33,6 +33,9 @@ const form = ref<any>({})
 const accountStrategy = ref<'auto' | 'fixed' | 'rotate'>('auto')
 const selectedAccountStateFile = ref(AUTO_ACCOUNT_VALUE)
 const keywordRulesInput = ref('')
+const requiredKeywordsInput = ref('')
+const optionalKeywordsInput = ref('')
+const optionalMinHitsInput = ref<number | null>(null)
 const cronMode = ref<'preset' | 'custom'>('preset')
 
 // 常用 cron 预设选项
@@ -115,6 +118,10 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       decision_mode: defaultValues.decision_mode || props.initialData.decision_mode || 'ai',
     }
     keywordRulesInput.value = (defaultValues.keyword_rules || props.initialData.keyword_rules || []).join('\n')
+    requiredKeywordsInput.value = (defaultValues.required_keywords || props.initialData.required_keywords || []).join('\n')
+    optionalKeywordsInput.value = (defaultValues.optional_keywords || props.initialData.optional_keywords || []).join('\n')
+    optionalMinHitsInput.value =
+      defaultValues.optional_min_hits ?? props.initialData.optional_min_hits ?? null
     // 编辑模式下，根据 cron 值判断模式
     const cronVal = defaultValues.cron ?? props.initialData.cron ?? ''
     cronMode.value = isPresetCronValue(cronVal) ? 'preset' : 'custom'
@@ -147,8 +154,20 @@ watch(() => [props.mode, props.initialData, props.defaultValues, props.defaultAc
       form.value.new_publish_option = '__none__'
     }
     keywordRulesInput.value = ''
+    requiredKeywordsInput.value = ''
+    optionalKeywordsInput.value = ''
+    optionalMinHitsInput.value = null
     if (defaultValues.keyword_rules && defaultValues.keyword_rules.length > 0) {
       keywordRulesInput.value = defaultValues.keyword_rules.join('\n')
+    }
+    if (defaultValues.required_keywords && defaultValues.required_keywords.length > 0) {
+      requiredKeywordsInput.value = defaultValues.required_keywords.join('\n')
+    }
+    if (defaultValues.optional_keywords && defaultValues.optional_keywords.length > 0) {
+      optionalKeywordsInput.value = defaultValues.optional_keywords.join('\n')
+    }
+    if (defaultValues.optional_min_hits != null) {
+      optionalMinHitsInput.value = defaultValues.optional_min_hits
     }
     // 创建模式下，根据默认值判断模式
     const cronVal = defaultValues.cron ?? ''
@@ -204,10 +223,20 @@ function handleSubmit() {
   }
 
   const keywordRules = parseKeywordText(keywordRulesInput.value)
-  if (decisionMode === 'keyword' && keywordRules.length === 0) {
+  const requiredKeywords = parseKeywordText(requiredKeywordsInput.value)
+  const optionalKeywords = parseKeywordText(optionalKeywordsInput.value)
+  if (decisionMode === 'keyword' && requiredKeywords.length === 0 && optionalKeywords.length === 0 && keywordRules.length === 0) {
     toast({
       title: t('tasks.form.validation.keywordRuleIncomplete'),
       description: t('tasks.form.validation.keywordRuleRequired'),
+      variant: 'destructive',
+    })
+    return
+  }
+  if (decisionMode === 'keyword' && optionalKeywords.length > 0 && optionalMinHitsInput.value != null && (optionalMinHitsInput.value < 1 || optionalMinHitsInput.value > optionalKeywords.length)) {
+    toast({
+      title: t('tasks.form.validation.keywordRuleIncomplete'),
+      description: t('tasks.form.validation.optionalMinHitsInvalid'),
       variant: 'destructive',
     })
     return
@@ -249,6 +278,12 @@ function handleSubmit() {
   submitData.account_strategy = currentAccountStrategy
   submitData.analyze_images = submitData.analyze_images !== false
   submitData.keyword_rules = decisionMode === 'keyword' ? keywordRules : []
+  submitData.required_keywords = decisionMode === 'keyword' ? requiredKeywords : []
+  submitData.optional_keywords = decisionMode === 'keyword' ? optionalKeywords : []
+  submitData.optional_min_hits =
+    decisionMode === 'keyword' && optionalKeywords.length > 0
+      ? (optionalMinHitsInput.value ?? null)
+      : null
   if (decisionMode === 'keyword' && !submitData.description) {
     submitData.description = ''
   }
@@ -306,16 +341,45 @@ function handleSubmit() {
       </div>
 
       <div v-if="form.decision_mode === 'keyword'" class="grid gap-2 sm:grid-cols-4 sm:gap-4">
-        <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.keywordRules') }}</Label>
+        <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.requiredKeywords') }}</Label>
         <div class="space-y-2 sm:col-span-3">
           <p class="text-xs text-gray-500">
-            {{ t('tasks.form.keywordRulesHint') }}
+            {{ t('tasks.form.requiredKeywordsHint') }}
           </p>
           <Textarea
-            v-model="keywordRulesInput"
-            class="min-h-[120px]"
-            :placeholder="t('tasks.form.keywordRulesPlaceholder')"
+            v-model="requiredKeywordsInput"
+            class="min-h-[100px]"
+            :placeholder="t('tasks.form.requiredKeywordsPlaceholder')"
           />
+        </div>
+      </div>
+
+      <div v-if="form.decision_mode === 'keyword'" class="grid gap-2 sm:grid-cols-4 sm:gap-4">
+        <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.optionalKeywords') }}</Label>
+        <div class="space-y-2 sm:col-span-3">
+          <p class="text-xs text-gray-500">
+            {{ t('tasks.form.optionalKeywordsHint') }}
+          </p>
+          <Textarea
+            v-model="optionalKeywordsInput"
+            class="min-h-[100px]"
+            :placeholder="t('tasks.form.optionalKeywordsPlaceholder')"
+          />
+        </div>
+      </div>
+
+      <div v-if="form.decision_mode === 'keyword'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+        <Label for="optional-min-hits" class="sm:text-right">{{ t('tasks.form.optionalMinHits') }}</Label>
+        <div class="space-y-1 sm:col-span-3">
+          <Input
+            id="optional-min-hits"
+            v-model.number="optionalMinHitsInput as any"
+            type="number"
+            min="1"
+          />
+          <p class="text-xs text-gray-500">
+            {{ t('tasks.form.optionalMinHitsHint') }}
+          </p>
         </div>
       </div>
 

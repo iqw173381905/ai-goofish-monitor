@@ -21,6 +21,13 @@ def _row_to_task(row) -> Task:
     payload["free_shipping"] = bool(payload["free_shipping"])
     payload["is_running"] = bool(payload["is_running"])
     payload["keyword_rules"] = json.loads(payload.pop("keyword_rules_json") or "[]")
+    payload["required_keywords"] = json.loads(
+        payload.pop("required_keywords_json", None) or "[]"
+    )
+    payload["optional_keywords"] = json.loads(
+        payload.pop("optional_keywords_json", None) or "[]"
+    )
+    payload.setdefault("optional_min_hits", None)
     return Task(**payload)
 
 
@@ -92,13 +99,15 @@ class SqliteTaskRepository(TaskRepository):
                     max_pages, personal_only, min_price, max_price, cron,
                     ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
                     account_strategy, free_shipping, new_publish_option, region,
-                    decision_mode, keyword_rules_json, is_running
+                    decision_mode, keyword_rules_json, required_keywords_json,
+                    optional_keywords_json, optional_min_hits, is_running
                 ) VALUES (
                     :id, :task_name, :enabled, :keyword, :description, :analyze_images,
                     :max_pages, :personal_only, :min_price, :max_price, :cron,
                     :ai_prompt_base_file, :ai_prompt_criteria_file, :account_state_file,
                     :account_strategy, :free_shipping, :new_publish_option, :region,
-                    :decision_mode, :keyword_rules_json, :is_running
+                    :decision_mode, :keyword_rules_json, :required_keywords_json,
+                    :optional_keywords_json, :optional_min_hits, :is_running
                 )
                 """,
                 payload,
@@ -128,5 +137,9 @@ class SqliteTaskRepository(TaskRepository):
         values["free_shipping"] = int(task.free_shipping)
         values["is_running"] = int(task.is_running)
         values["keyword_rules_json"] = json.dumps(task.keyword_rules or [], ensure_ascii=False)
+        values["required_keywords_json"] = json.dumps(task.required_keywords or [], ensure_ascii=False)
+        values["optional_keywords_json"] = json.dumps(task.optional_keywords or [], ensure_ascii=False)
         values.pop("keyword_rules", None)
+        values.pop("required_keywords", None)
+        values.pop("optional_keywords", None)
         return values

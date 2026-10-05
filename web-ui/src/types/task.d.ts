@@ -22,6 +22,9 @@ export interface Task {
   region?: string | null;
   decision_mode: 'ai' | 'keyword';
   keyword_rules: string[];
+  required_keywords: string[];
+  optional_keywords: string[];
+  optional_min_hits: number | null;
   is_running: boolean;
 }
 
@@ -73,4 +76,7 @@ export interface TaskGenerateRequest {
   region?: string | null;
   decision_mode?: 'ai' | 'keyword';
   keyword_rules?: string[];
+  required_keywords?: string[];
+  optional_keywords?: string[];
+  optional_min_hits?: number | null;
 }

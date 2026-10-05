@@ -129,6 +129,9 @@ class Task(BaseModel):
     region: Optional[str] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
+    required_keywords: List[str] = Field(default_factory=list)
+    optional_keywords: List[str] = Field(default_factory=list)
+    optional_min_hits: Optional[int] = None
     is_running: bool = False
 
     @model_validator(mode="before")
@@ -136,7 +139,7 @@ class Task(BaseModel):
     def normalize_legacy_keyword_payload(cls, values):
         return _normalize_payload_keywords(values)
 
-    @field_validator("keyword_rules", mode="before")
+    @field_validator("keyword_rules", "required_keywords", "optional_keywords", mode="before")
     @classmethod
     def normalize_keyword_rules(cls, value):
         return _normalize_keyword_values(value)
@@ -179,6 +182,9 @@ class TaskCreate(BaseModel):
     region: Optional[str] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
+    required_keywords: List[str] = Field(default_factory=list)
+    optional_keywords: List[str] = Field(default_factory=list)
+    optional_min_hits: Optional[int] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -205,7 +211,7 @@ class TaskCreate(BaseModel):
     def validate_cron(cls, value):
         return _validate_cron_expression(value)
 
-    @field_validator("keyword_rules", mode="before")
+    @field_validator("keyword_rules", "required_keywords", "optional_keywords", mode="before")
     @classmethod
     def normalize_keyword_rules(cls, value):
         return _normalize_keyword_values(value)
@@ -246,6 +252,9 @@ class TaskUpdate(BaseModel):
     region: Optional[str] = None
     decision_mode: Optional[Literal["ai", "keyword"]] = None
     keyword_rules: Optional[List[str]] = None
+    required_keywords: Optional[List[str]] = None
+    optional_keywords: Optional[List[str]] = None
+    optional_min_hits: Optional[int] = None
     is_running: Optional[bool] = None
 
     @model_validator(mode="before")
@@ -273,7 +282,7 @@ class TaskUpdate(BaseModel):
     def validate_cron(cls, value):
         return _validate_cron_expression(value)
 
-    @field_validator("keyword_rules", mode="before")
+    @field_validator("keyword_rules", "required_keywords", "optional_keywords", mode="before")
     @classmethod
     def normalize_keyword_rules(cls, value):
         return _normalize_keyword_values(value)
@@ -310,6 +319,9 @@ class TaskGenerateRequest(BaseModel):
     region: Optional[str] = None
     decision_mode: Literal["ai", "keyword"] = "ai"
     keyword_rules: List[str] = Field(default_factory=list)
+    required_keywords: List[str] = Field(default_factory=list)
+    optional_keywords: List[str] = Field(default_factory=list)
+    optional_min_hits: Optional[int] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -341,7 +353,7 @@ class TaskGenerateRequest(BaseModel):
     def empty_str_to_none_for_strings(cls, value):
         return _normalize_optional_string(value)
 
-    @field_validator("keyword_rules", mode="before")
+    @field_validator("keyword_rules", "required_keywords", "optional_keywords", mode="before")
     @classmethod
     def normalize_keyword_rules(cls, value):
         return _normalize_keyword_values(value)

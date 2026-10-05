@@ -5,7 +5,7 @@
 import asyncio
 import copy
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional
 
 from src.keyword_rule_engine import build_search_text, evaluate_keyword_rules
@@ -26,10 +26,13 @@ class ItemAnalysisJob:
     analyze_images: bool
     prompt_text: str
     keyword_rules: tuple[str, ...]
-    final_record: dict
-    seller_id: Optional[str]
-    zhima_credit_text: Optional[str]
-    registration_duration_text: str
+    required_keywords: tuple[str, ...] = ()
+    optional_keywords: tuple[str, ...] = ()
+    optional_min_hits: Optional[int] = None
+    final_record: dict = field(default_factory=dict)
+    seller_id: Optional[str] = None
+    zhima_credit_text: Optional[str] = None
+    registration_duration_text: str = ""
 
 
 class ItemAnalysisDispatcher:
@@ -99,7 +102,13 @@ class ItemAnalysisDispatcher:
 
     def _build_keyword_result(self, job: ItemAnalysisJob, record: dict) -> dict:
         search_text = build_search_text(record)
-        return evaluate_keyword_rules(list(job.keyword_rules), search_text)
+        return evaluate_keyword_rules(
+            list(job.keyword_rules),
+            search_text,
+            required_keywords=list(job.required_keywords),
+            optional_keywords=list(job.optional_keywords),
+            optional_min_hits=job.optional_min_hits,
+        )
 
     def _build_skip_ai_result(self) -> dict:
         return {
