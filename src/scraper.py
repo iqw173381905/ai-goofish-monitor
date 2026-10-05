@@ -84,6 +84,12 @@ def _is_login_url(url: str) -> bool:
 
 def _resolve_browser_channel() -> str:
     global EDGE_DOCKER_WARNING_PRINTED
+    # 允许通过 BROWSER_CHANNEL 环境变量覆盖浏览器通道。
+    # 留空（BROWSER_CHANNEL=）则使用 Playwright 默认打包浏览器，
+    # 避免完整版 Chromium headless 在某些 Windows 环境下不稳定。
+    env_channel = os.environ.get("BROWSER_CHANNEL")
+    if env_channel is not None:
+        return env_channel
     if RUNNING_IN_DOCKER:
         if LOGIN_IS_EDGE and not EDGE_DOCKER_WARNING_PRINTED:
             print(
@@ -329,10 +335,23 @@ def _build_context_overrides(snapshot: dict) -> dict:
 def _build_extra_headers(raw_headers: Optional[dict]) -> dict:
     if not raw_headers:
         return {}
-    excluded = {"cookie", "content-length"}
+    # 排除浏览器自动管理、手动覆盖会造成请求特征不一致（易触发风控）的头
+    excluded = {
+        "cookie",
+        "content-length",
+        "accept-encoding",
+        "accept-language",
+        "user-agent",
+    }
     headers = {}
     for key, value in raw_headers.items():
-        if not key or key.lower() in excluded or value is None:
+        if not key or value is None:
+            continue
+        k = key.lower()
+        if k in excluded:
+            continue
+        if k.startswith("sec-ch-") or k.startswith("sec-fetch-"):
+            # 浏览器自动生成的安全头，覆盖后与真实浏览器行为不一致
             continue
         headers[key] = value
     return headers
@@ -564,7 +583,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
             if proxy_server:
                 launch_kwargs["proxy"] = {"server": proxy_server}
 
-            launch_kwargs["channel"] = _resolve_browser_channel()
+            resolved_channel = _resolve_browser_channel()
+            if resolved_channel:
+                launch_kwargs["channel"] = resolved_channel
 
             browser = await p.chromium.launch(**launch_kwargs)
 
@@ -654,20 +675,22 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 search_url = f"https://www.goofish.com/search?{urlencode(params)}"
                 log_time(f"目标URL: {search_url}")
 
-                # 先监听搜索接口响应，再执行导航，避免错过首次请求
+                # 先监听搜索接口响应，再执行导航；搜索接口响应可能晚于
+                # domcontentloaded 才到达，因此必须在上下文内等待 .value，
+                # 让上下文保持打开直到响应到达，避免错过首次请求。
                 async with page.expect_response(
                     is_search_results_response, timeout=30000
                 ) as initial_response_info:
                     await page.goto(
                         search_url, wait_until="domcontentloaded", timeout=60000
                     )
-                if _is_login_url(page.url):
-                    raise LoginRequiredError(
-                        f"Login required: redirected to {page.url} (cookies/state likely expired)"
-                    )
+                    if _is_login_url(page.url):
+                        raise LoginRequiredError(
+                            f"Login required: redirected to {page.url} (cookies/state likely expired)"
+                        )
 
-                # 捕获初始搜索的API数据
-                initial_response = await initial_response_info.value
+                    # 捕获初始搜索的API数据（在上下文内等待响应到达）
+                    initial_response = await initial_response_info.value
 
                 # 等待页面加载出关键筛选元素，以确认已成功进入搜索结果页
                 try:

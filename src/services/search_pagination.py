@@ -31,10 +31,9 @@ def is_search_results_response(
     response: Any,
     api_url_fragment: str = SEARCH_RESULTS_API_FRAGMENT,
 ) -> bool:
-    request = getattr(response, "request", None)
-    request_method = getattr(request, "method", None)
+    # 兼容闲鱼网页版搜索接口 GET/POST 两种请求方式（当前线上搜索接口为 GET）
     response_url = getattr(response, "url", "")
-    return api_url_fragment in response_url and request_method == "POST"
+    return api_url_fragment in response_url
 
 
 async def advance_search_page(
@@ -54,6 +53,8 @@ async def advance_search_page(
     for retry_index in range(max_retries):
         try:
             await next_button.scroll_into_view_if_needed()
+            # 先监听响应再点击；响应可能晚于 click 返回才到达，
+            # 因此在上下文内等待 .value，保持上下文打开直到响应到达。
             async with page.expect_response(
                 is_search_results_response,
                 timeout=PAGE_REQUEST_TIMEOUT_MS,
@@ -66,13 +67,14 @@ async def advance_search_page(
                         advanced=False,
                         stop_reason="click_timeout",
                     )
+                response = await response_info.value
             await wait_after_click(
                 PAGE_CLICK_SLEEP_MIN_SECONDS,
                 PAGE_CLICK_SLEEP_MAX_SECONDS,
             )
             return PageAdvanceResult(
                 advanced=True,
-                response=await response_info.value,
+                response=response,
             )
         except PlaywrightTimeoutError:
             if retry_index < max_retries - 1:
