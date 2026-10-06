@@ -60,21 +60,21 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
     output_filename = f"prompts/{safe_keyword}_criteria.txt"
 
     def _set_generating(value: bool) -> None:
-        try:
-            with sqlite_connection() as conn:
-                if value:
+        """置位/清位 criteria_generating，带重试兜底（Windows 上偶发 sqlite 写锁）。"""
+        for attempt in range(3):
+            try:
+                with sqlite_connection() as conn:
                     conn.execute(
-                        "UPDATE tasks SET criteria_generating = 1 WHERE id = ?",
-                        (task_id,),
+                        "UPDATE tasks SET criteria_generating = ? WHERE id = ?",
+                        (1 if value else 0, task_id),
                     )
-                else:
-                    conn.execute(
-                        "UPDATE tasks SET criteria_generating = 0 WHERE id = ?",
-                        (task_id,),
-                    )
-                conn.commit()
-        except Exception as e:
-            print(f"[后台] 更新 criteria 状态失败 task={task_id}: {e}")
+                    conn.commit()
+                return
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[后台] 更新 criteria 状态失败 task={task_id}: {e}")
+                    return
+                time.sleep(0.5)
 
     def worker():
         _set_generating(True)
@@ -102,12 +102,29 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
             os.makedirs("prompts", exist_ok=True)
             with open(output_filename, 'w', encoding='utf-8') as f:
                 f.write(generated)
-            with sqlite_connection() as conn:
-                conn.execute(
-                    "UPDATE tasks SET ai_prompt_criteria_file = ?, criteria_generating = 0, criteria_generated_at = ? WHERE id = ?",
-                    (output_filename, datetime.now().isoformat(timespec="seconds"), task_id),
-                )
-                conn.commit()
+            # 写 DB（标准文件 + 清生成标记 + 记录生成时间），带重试兜底
+            written = False
+            for attempt in range(3):
+                try:
+                    with sqlite_connection() as conn:
+                        conn.execute(
+                            "UPDATE tasks SET ai_prompt_criteria_file = ?, criteria_generating = 0, criteria_generated_at = ? WHERE id = ?",
+                            (
+                                output_filename,
+                                datetime.now().isoformat(timespec="seconds"),
+                                task_id,
+                            ),
+                        )
+                        conn.commit()
+                    written = True
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        print(f"[后台] 保存 AI 分析标准失败 task={task_id}: {e}")
+                    time.sleep(0.5)
+            if not written:
+                _set_generating(False)
+                return
             print(f"[后台] AI 分析标准已生成并保存: {output_filename}")
         except Exception as e:
             print(f"[后台] 保存 AI 分析标准失败 task={task_id}: {e}")

@@ -94,26 +94,65 @@ class SqliteTaskRepository(TaskRepository):
             if task_id is None:
                 task_id = self._next_task_id(conn)
             payload = self._task_values(task.model_copy(update={"id": task_id}))
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO tasks (
-                    id, task_name, enabled, keyword, description, analyze_images,
-                    max_pages, personal_only, min_price, max_price, cron,
-                    ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
-                    account_strategy, free_shipping, new_publish_option, region,
-                    decision_mode, keyword_rules_json, required_keywords_json,
-                    optional_keywords_json, optional_min_hits, is_running
-                ) VALUES (
-                    :id, :task_name, :enabled, :keyword, :description, :analyze_images,
-                    :max_pages, :personal_only, :min_price, :max_price, :cron,
-                    :ai_prompt_base_file, :ai_prompt_criteria_file, :account_state_file,
-                    :account_strategy, :free_shipping, :new_publish_option, :region,
-                    :decision_mode, :keyword_rules_json, :required_keywords_json,
-                    :optional_keywords_json, :optional_min_hits, :is_running
+            exists = conn.execute(
+                "SELECT 1 FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            if exists:
+                # 更新已存在任务：仅更新业务列。
+                # 关键：不更新 criteria_generating / criteria_generated_at，
+                # 避免覆盖后台线程正在置位的 AI 标准生成状态（曾用 INSERT OR REPLACE
+                # 重建整行导致新列被重置为默认值，生成状态被静默清零）。
+                conn.execute(
+                    """
+                    UPDATE tasks SET
+                        task_name = :task_name,
+                        enabled = :enabled,
+                        keyword = :keyword,
+                        description = :description,
+                        analyze_images = :analyze_images,
+                        max_pages = :max_pages,
+                        personal_only = :personal_only,
+                        min_price = :min_price,
+                        max_price = :max_price,
+                        cron = :cron,
+                        ai_prompt_base_file = :ai_prompt_base_file,
+                        ai_prompt_criteria_file = :ai_prompt_criteria_file,
+                        account_state_file = :account_state_file,
+                        account_strategy = :account_strategy,
+                        free_shipping = :free_shipping,
+                        new_publish_option = :new_publish_option,
+                        region = :region,
+                        decision_mode = :decision_mode,
+                        keyword_rules_json = :keyword_rules_json,
+                        required_keywords_json = :required_keywords_json,
+                        optional_keywords_json = :optional_keywords_json,
+                        optional_min_hits = :optional_min_hits,
+                        is_running = :is_running
+                    WHERE id = :id
+                    """,
+                    payload,
                 )
-                """,
-                payload,
-            )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO tasks (
+                        id, task_name, enabled, keyword, description, analyze_images,
+                        max_pages, personal_only, min_price, max_price, cron,
+                        ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
+                        account_strategy, free_shipping, new_publish_option, region,
+                        decision_mode, keyword_rules_json, required_keywords_json,
+                        optional_keywords_json, optional_min_hits, is_running
+                    ) VALUES (
+                        :id, :task_name, :enabled, :keyword, :description, :analyze_images,
+                        :max_pages, :personal_only, :min_price, :max_price, :cron,
+                        :ai_prompt_base_file, :ai_prompt_criteria_file, :account_state_file,
+                        :account_strategy, :free_shipping, :new_publish_option, :region,
+                        :decision_mode, :keyword_rules_json, :required_keywords_json,
+                        :optional_keywords_json, :optional_min_hits, :is_running
+                    )
+                    """,
+                    payload,
+                )
             conn.commit()
         return task.model_copy(update={"id": task_id})
 

@@ -231,7 +231,9 @@ async function criteriaPollOnce() {
 function ensureCriteriaPolling() {
   if (criteriaPolling.value === null) {
     criteriaPolling.value = window.setInterval(criteriaPollOnce, 3000)
-    criteriaPollOnce() // 立即先拉一次，尽快显示真实状态
+    // 注意：不立即执行首次轮询。乐观置位刚写入本地任务对象，
+    // 立即 fetchTasks 会用后端旧值（generating=false）覆盖，徽标瞬间消失。
+    // 3 秒后首次轮询时后端 worker 必然已置位 generating=true。
   }
 }
 
