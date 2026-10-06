@@ -90,24 +90,54 @@ def _cookie_changed(
 class _FileLock:
     def __init__(self, fh):
         self._fh = fh
+        self._locked = False
 
     def __enter__(self):
-        try:
-            import fcntl
-
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
-        except Exception:
-            pass
+        self._locked = _lock_fd(self._fh)
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        try:
-            import fcntl
-
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
+        if self._locked:
+            _unlock_fd(self._fh)
         return False
+
+
+def _lock_fd(fh) -> bool:
+    """跨平台文件锁：Windows 用 msvcrt，POSIX 用 fcntl。失败时降级为无锁。"""
+    if os.name == "nt":
+        try:
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            return True
+        except OSError:
+            return False
+    try:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        return True
+    except Exception:
+        return False
+
+
+def _unlock_fd(fh) -> None:
+    if os.name == "nt":
+        try:
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        return
+    try:
+        import fcntl
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        pass
 
 
 def _ensure_parent_dir(path: str) -> None:
@@ -140,7 +170,20 @@ def _atomic_write_json(path: str, data: dict) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)
+    # Windows 下目标文件被其他进程短暂占用时 os.replace 会抛 WinError 5，
+    # 重试数次（持有句柄的临界区通常只有几毫秒），仍失败则降级为备份文件写入。
+    for attempt in range(5):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError:
+            if attempt < 4:
+                time.sleep(0.2 * (attempt + 1))
+    backup = f"{path}.bak.{int(time.time())}"
+    try:
+        os.replace(tmp, backup)
+    except OSError:
+        pass
 
 
 @dataclass(frozen=True)
