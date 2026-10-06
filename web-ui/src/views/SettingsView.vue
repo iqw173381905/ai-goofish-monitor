@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useSettings } from '@/composables/useSettings'
-import type { NotificationSettingsUpdate, NotificationTestResponse } from '@/api/settings'
+import type { NotificationSettingsUpdate, NotificationTestResponse, AiProfile, AiProfilePayload } from '@/api/settings'
+import { getAiProfiles, createAiProfile, deleteAiProfile, applyAiProfile, getAiSettings, getSystemStatus } from '@/api/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { getPromptContent, listPrompts, updatePrompt } from '@/api/prompts'
 import NotificationSettingsPanel from '@/components/settings/NotificationSettingsPanel.vue'
@@ -45,6 +47,26 @@ const isPromptLoading = ref(false)
 const isPromptSaving = ref(false)
 const promptError = ref<string | null>(null)
 
+// ---- AI 模型档案 ----
+const aiProfiles = ref<AiProfile[]>([])
+const selectedProfileId = ref<number | null>(null)
+const isProfilesLoading = ref(false)
+const isProfileApplying = ref(false)
+const isProfileDeleting = ref(false)
+const isProfileDialogOpen = ref(false)
+const isProfileSaving = ref(false)
+const profileForm = ref<AiProfilePayload>({
+  name: '',
+  base_url: '',
+  api_key: '',
+  model_name: '',
+  proxy_url: ''
+})
+
+const selectedProfile = computed(() => {
+  return aiProfiles.value.find(p => p.id === selectedProfileId.value) || null
+})
+
 function notifySuccess(title: string, description?: string) {
   toast({ title, description })
 }
@@ -52,6 +74,96 @@ function notifySuccess(title: string, description?: string) {
 function notifyError(title: string, description?: string) {
   toast({ title, description, variant: 'destructive' })
 }
+
+async function loadAiProfiles() {
+  isProfilesLoading.value = true
+  try {
+    const res = await getAiProfiles()
+    aiProfiles.value = res.profiles
+    if (selectedProfileId.value) {
+      const stillExists = aiProfiles.value.some(p => p.id === selectedProfileId.value)
+      if (!stillExists) selectedProfileId.value = null
+    }
+  } catch (e) {
+    notifyError(t('settings.ai.applyFailed'), (e as Error).message)
+  } finally {
+    isProfilesLoading.value = false
+  }
+}
+
+async function handleSelectProfile(profileId: unknown) {
+  const id = Number(profileId)
+  if (!id) return
+  selectedProfileId.value = id
+  isProfileApplying.value = true
+  try {
+    const res = await applyAiProfile(id)
+    // 同步当前生效配置到表单
+    const active = await getAiSettings()
+    aiSettings.value = { ...active }
+    systemStatus.value = await getSystemStatus()
+    notifySuccess(t('settings.ai.applied', { name: res.profile?.name || '' }))
+  } catch (e) {
+    notifyError(t('settings.ai.applyFailed'), (e as Error).message)
+    // 应用失败时恢复下拉选择
+    selectedProfileId.value = null
+  } finally {
+    isProfileApplying.value = false
+  }
+}
+
+async function handleDeleteProfile() {
+  if (!selectedProfileId.value) return
+  const target = aiProfiles.value.find(p => p.id === selectedProfileId.value)
+  const name = target?.name || ''
+  if (!window.confirm(t('settings.ai.deleteConfirm', { name }))) return
+  isProfileDeleting.value = true
+  try {
+    await deleteAiProfile(selectedProfileId.value)
+    selectedProfileId.value = null
+    await loadAiProfiles()
+    notifySuccess(t('settings.ai.deleted'))
+  } catch (e) {
+    notifyError(t('settings.ai.deleteFailed'), (e as Error).message)
+  } finally {
+    isProfileDeleting.value = false
+  }
+}
+
+function resetProfileForm() {
+  profileForm.value = { name: '', base_url: '', api_key: '', model_name: '', proxy_url: '' }
+}
+
+async function handleCreateProfile() {
+  const f = profileForm.value
+  if (!f.name.trim() || !f.base_url.trim() || !f.api_key.trim() || !f.model_name.trim()) {
+    notifyError(t('settings.ai.profileNameRequired'))
+    return
+  }
+  isProfileSaving.value = true
+  try {
+    await createAiProfile({
+      name: f.name.trim(),
+      base_url: f.base_url.trim(),
+      api_key: f.api_key.trim(),
+      model_name: f.model_name.trim(),
+      proxy_url: f.proxy_url?.trim() || ''
+    })
+    notifySuccess(t('settings.ai.profileSaved', { name: f.name.trim() }))
+    isProfileDialogOpen.value = false
+    resetProfileForm()
+    await loadAiProfiles()
+  } catch (e) {
+    const msg = (e as Error).message || ''
+    notifyError(t('settings.ai.profileSaveFailed'), msg)
+  } finally {
+    isProfileSaving.value = false
+  }
+}
+
+onMounted(() => {
+  loadAiProfiles()
+})
 
 async function handleSaveNotifications(payload: NotificationSettingsUpdate) {
   try {
@@ -197,44 +309,121 @@ watch(selectedPrompt, async (value) => {
 
       <!-- AI Tab -->
       <TabsContent value="ai">
-        <Card>
-          <CardHeader>
-            <CardTitle>{{ t('settings.ai.title') }}</CardTitle>
-            <CardDescription>{{ t('settings.ai.description') }}</CardDescription>
-          </CardHeader>
-          <CardContent v-if="isReady" class="space-y-4">
-            <div class="grid gap-2">
-              <Label>API Base URL</Label>
-              <Input v-model="aiSettings.OPENAI_BASE_URL" placeholder="https://api.openai.com/v1" />
-            </div>
-            <div class="grid gap-2">
-              <Label>API Key</Label>
-              <Input
-                v-model="aiSettings.OPENAI_API_KEY"
-                type="password"
-                :placeholder="t('settings.ai.keyPlaceholder')"
-              />
-              <p class="text-xs text-gray-500">
-                {{ systemStatus?.env_file.openai_api_key_set ? t('settings.ai.keyConfigured') : t('settings.ai.keyMissing') }}
-              </p>
-            </div>
-            <div class="grid gap-2">
-              <Label>{{ t('settings.ai.modelName') }}</Label>
-              <Input v-model="aiSettings.OPENAI_MODEL_NAME" placeholder="gpt-3.5-turbo" />
-            </div>
-            <div class="grid gap-2">
-              <Label>{{ t('settings.ai.proxy') }}</Label>
-              <Input v-model="aiSettings.PROXY_URL" placeholder="http://127.0.0.1:7890" />
-            </div>
-          </CardContent>
-          <CardContent v-else class="py-8 text-sm text-gray-500">
-            {{ t('settings.ai.loading') }}
-          </CardContent>
-          <CardFooter v-if="isReady" class="flex gap-2">
-            <Button variant="outline" @click="handleTestAi" :disabled="isSaving">{{ t('settings.ai.testConnection') }}</Button>
-            <Button @click="handleSaveAi" :disabled="isSaving">{{ t('settings.ai.save') }}</Button>
-          </CardFooter>
-        </Card>
+        <div class="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>{{ t('settings.ai.profilesTitle') }}</CardTitle>
+              <CardDescription>{{ t('settings.ai.profilesDescription') }}</CardDescription>
+            </CardHeader>
+            <CardContent class="space-y-4">
+              <p class="text-xs text-gray-500">{{ t('settings.ai.profileHint') }}</p>
+              <div v-if="isProfilesLoading" class="text-sm text-gray-500">{{ t('settings.ai.loading') }}</div>
+              <template v-else>
+                <div v-if="aiProfiles.length === 0" class="text-sm text-gray-500">{{ t('settings.ai.emptyProfiles') }}</div>
+                <div v-else class="flex flex-wrap items-end gap-2">
+                  <div class="grid gap-2 min-w-[260px] flex-1">
+                    <Label>{{ t('settings.ai.selectProfile') }}</Label>
+                    <Select :model-value="selectedProfileId ? String(selectedProfileId) : ''" @update:model-value="handleSelectProfile">
+                      <SelectTrigger>
+                        <SelectValue :placeholder="t('settings.ai.selectProfile')" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem v-for="p in aiProfiles" :key="p.id" :value="String(p.id)">
+                          {{ p.name }} — {{ p.base_url }} / {{ p.model_name }}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p v-if="selectedProfileId && selectedProfile" class="text-xs text-gray-500">
+                      API Key: {{ selectedProfile.api_key_masked }}
+                    </p>
+                  </div>
+                  <Button variant="outline" :disabled="!selectedProfileId || isProfileApplying" @click="handleDeleteProfile">
+                    {{ t('settings.ai.delete') }}
+                  </Button>
+                </div>
+              </template>
+            </CardContent>
+            <CardFooter>
+              <Dialog v-model:open="isProfileDialogOpen">
+                <DialogTrigger as-child>
+                  <Button :disabled="isProfileSaving">{{ t('settings.ai.addProfile') }}</Button>
+                </DialogTrigger>
+                <DialogContent class="sm:max-w-[520px] max-h-[85vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>{{ t('settings.ai.addProfileTitle') }}</DialogTitle>
+                    <DialogDescription>{{ t('settings.ai.addProfileDescription') }}</DialogDescription>
+                  </DialogHeader>
+                  <div class="grid gap-3">
+                    <div class="grid gap-2">
+                      <Label>{{ t('settings.ai.profileName') }}</Label>
+                      <Input v-model="profileForm.name" :placeholder="t('settings.ai.profileNamePlaceholder')" />
+                    </div>
+                    <div class="grid gap-2">
+                      <Label>{{ t('settings.ai.baseUrl') }}</Label>
+                      <Input v-model="profileForm.base_url" placeholder="https://api.xxx.com/v1" />
+                    </div>
+                    <div class="grid gap-2">
+                      <Label>{{ t('settings.ai.apiKey') }}</Label>
+                      <Input v-model="profileForm.api_key" type="password" :placeholder="t('settings.ai.apiKeyPlaceholder')" />
+                    </div>
+                    <div class="grid gap-2">
+                      <Label>{{ t('settings.ai.modelName') }}</Label>
+                      <Input v-model="profileForm.model_name" placeholder="Qwen/Qwen3.5-35B-A3B" />
+                    </div>
+                    <div class="grid gap-2">
+                      <Label>{{ t('settings.ai.proxy') }}</Label>
+                      <Input v-model="profileForm.proxy_url" placeholder="http://127.0.0.1:7890" />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button @click="handleCreateProfile" :disabled="isProfileSaving">
+                      {{ isProfileSaving ? t('settings.ai.savingProfile') : t('settings.ai.saveProfile') }}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </CardFooter>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{{ t('settings.ai.title') }}</CardTitle>
+              <CardDescription>{{ t('settings.ai.description') }}</CardDescription>
+            </CardHeader>
+            <CardContent v-if="isReady" class="space-y-4">
+              <div class="grid gap-2">
+                <Label>API Base URL</Label>
+                <Input v-model="aiSettings.OPENAI_BASE_URL" placeholder="https://api.openai.com/v1" />
+              </div>
+              <div class="grid gap-2">
+                <Label>API Key</Label>
+                <Input
+                  v-model="aiSettings.OPENAI_API_KEY"
+                  type="password"
+                  :placeholder="t('settings.ai.keyPlaceholder')"
+                />
+                <p class="text-xs text-gray-500">
+                  {{ systemStatus?.env_file.openai_api_key_set ? t('settings.ai.keyConfigured') : t('settings.ai.keyMissing') }}
+                </p>
+              </div>
+              <div class="grid gap-2">
+                <Label>{{ t('settings.ai.modelName') }}</Label>
+                <Input v-model="aiSettings.OPENAI_MODEL_NAME" placeholder="gpt-3.5-turbo" />
+              </div>
+              <div class="grid gap-2">
+                <Label>{{ t('settings.ai.proxy') }}</Label>
+                <Input v-model="aiSettings.PROXY_URL" placeholder="http://127.0.0.1:7890" />
+              </div>
+            </CardContent>
+            <CardContent v-else class="py-8 text-sm text-gray-500">
+              {{ t('settings.ai.loading') }}
+            </CardContent>
+            <CardFooter v-if="isReady" class="flex gap-2">
+              <Button variant="outline" @click="handleTestAi" :disabled="isSaving">{{ t('settings.ai.testConnection') }}</Button>
+              <Button @click="handleSaveAi" :disabled="isSaving">{{ t('settings.ai.save') }}</Button>
+            </CardFooter>
+          </Card>
+        </div>
       </TabsContent>
 
       <!-- Rotation Tab -->

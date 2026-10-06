@@ -15,6 +15,13 @@ from src.infrastructure.config.settings import (
     reload_settings,
     scraper_settings,
 )
+from src.infrastructure.persistence.sqlite_ai_profile_repository import (
+    create_ai_profile,
+    delete_ai_profile,
+    get_ai_profile,
+    list_ai_profiles,
+    update_ai_profile,
+)
 from src.services.ai_request_compat import (
     CHAT_COMPLETIONS_API_MODE,
     RESPONSES_API_MODE,
@@ -104,6 +111,26 @@ class AISettingsModel(BaseModel):
     OPENAI_MODEL_NAME: Optional[str] = None
     SKIP_AI_ANALYSIS: Optional[bool] = None
     PROXY_URL: Optional[str] = None
+
+
+class AIProfileCreateModel(BaseModel):
+    """AI 模型档案创建模型"""
+
+    name: str = Field(min_length=1, max_length=60)
+    base_url: str = Field(min_length=1)
+    api_key: str = Field(min_length=1)
+    model_name: str = Field(min_length=1)
+    proxy_url: Optional[str] = None
+
+
+class AIProfileUpdateModel(BaseModel):
+    """AI 模型档案更新模型"""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    base_url: Optional[str] = Field(default=None, min_length=1)
+    api_key: Optional[str] = Field(default=None, min_length=1)
+    model_name: Optional[str] = Field(default=None, min_length=1)
+    proxy_url: Optional[str] = None
 
 
 class RotationSettingsModel(BaseModel):
@@ -345,3 +372,100 @@ async def test_ai_settings(settings: dict):
             "success": False,
             "message": f"AI模型连接测试失败: {exc}",
         }
+
+
+def _mask_api_key(key: str) -> str:
+    """对 API Key 做掩码，仅返回前 3 位 + 尾 4 位。"""
+    key = key or ""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:3]}****{key[-4:]}"
+
+
+def _profile_public(profile: dict) -> dict:
+    """去掉完整 api_key，只返回掩码。"""
+    return {
+        "id": profile["id"],
+        "name": profile["name"],
+        "base_url": profile["base_url"],
+        "api_key_masked": _mask_api_key(profile.get("api_key") or ""),
+        "model_name": profile["model_name"],
+        "proxy_url": profile.get("proxy_url") or "",
+        "created_at": profile.get("created_at"),
+        "updated_at": profile.get("updated_at"),
+    }
+
+
+@router.get("/ai/profiles")
+async def get_ai_profiles():
+    profiles = list_ai_profiles()
+    return {"profiles": [_profile_public(p) for p in profiles]}
+
+
+@router.post("/ai/profiles")
+async def add_ai_profile(payload: AIProfileCreateModel):
+    try:
+        profile = create_ai_profile(
+            name=payload.name,
+            base_url=payload.base_url,
+            api_key=payload.api_key,
+            model_name=payload.model_name,
+            proxy_url=payload.proxy_url,
+        )
+    except Exception as exc:
+        if "UNIQUE" in str(exc).upper():
+            raise HTTPException(
+                status_code=409, detail=f"档案名称「{payload.name}」已存在，请换一个名称。"
+            ) from exc
+        raise HTTPException(status_code=500, detail=f"保存模型档案失败: {exc}") from exc
+    return {"message": "模型档案已保存", "profile": _profile_public(profile)}
+
+
+@router.put("/ai/profiles/{profile_id}")
+async def edit_ai_profile(profile_id: int, payload: AIProfileUpdateModel):
+    profile = update_ai_profile(
+        profile_id,
+        name=payload.name,
+        base_url=payload.base_url,
+        api_key=payload.api_key,
+        model_name=payload.model_name,
+        proxy_url=payload.proxy_url,
+    )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="模型档案不存在")
+    return {"message": "模型档案已更新", "profile": _profile_public(profile)}
+
+
+@router.delete("/ai/profiles/{profile_id}")
+async def remove_ai_profile(profile_id: int):
+    if not delete_ai_profile(profile_id):
+        raise HTTPException(status_code=404, detail="模型档案不存在")
+    return {"message": "模型档案已删除"}
+
+
+@router.post("/ai/profiles/{profile_id}/apply")
+async def apply_ai_profile(profile_id: int):
+    """将某个已保存的模型档案应用到当前生效配置（写入 .env 并热重载）。"""
+    profile = get_ai_profile(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="模型档案不存在")
+
+    updates = {
+        "OPENAI_API_KEY": profile["api_key"],
+        "OPENAI_BASE_URL": profile["base_url"],
+        "OPENAI_MODEL_NAME": profile["model_name"],
+        "PROXY_URL": profile.get("proxy_url") or "",
+    }
+    success = env_manager.update_values(updates)
+    if not success:
+        raise HTTPException(status_code=500, detail="应用模型档案失败（写入 .env 出错）")
+    _reload_env()
+    return {
+        "message": f"已切换到模型档案「{profile['name']}」",
+        "profile": _profile_public(profile),
+        "active_settings": {
+            "OPENAI_BASE_URL": env_manager.get_value("OPENAI_BASE_URL", ""),
+            "OPENAI_MODEL_NAME": env_manager.get_value("OPENAI_MODEL_NAME", ""),
+            "PROXY_URL": env_manager.get_value("PROXY_URL", ""),
+        },
+    }

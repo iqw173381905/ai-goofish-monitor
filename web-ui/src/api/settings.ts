@@ -59,6 +59,35 @@ export interface AiSettings {
   PROXY_URL?: string
 }
 
+export interface AiProfile {
+  id: number
+  name: string
+  base_url: string
+  api_key_masked?: string
+  model_name: string
+  proxy_url?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface AiProfilePayload {
+  name: string
+  base_url: string
+  api_key: string
+  model_name: string
+  proxy_url?: string
+}
+
+export interface AiProfileApplyResponse {
+  message: string
+  profile?: AiProfile
+  active_settings?: {
+    OPENAI_BASE_URL?: string
+    OPENAI_MODEL_NAME?: string
+    PROXY_URL?: string
+  }
+}
+
 export interface RotationSettings {
   ACCOUNT_ROTATION_ENABLED?: boolean
   ACCOUNT_ROTATION_MODE?: string
@@ -153,6 +182,34 @@ export async function testAiSettings(settings: AiSettings): Promise<{ success: b
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings)
   })
+}
+
+export async function getAiProfiles(): Promise<{ profiles: AiProfile[] }> {
+  return await http('/api/settings/ai/profiles')
+}
+
+export async function createAiProfile(payload: AiProfilePayload): Promise<{ message: string; profile: AiProfile }> {
+  return await http('/api/settings/ai/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function updateAiProfile(profileId: number, payload: Partial<AiProfilePayload>): Promise<{ message: string; profile: AiProfile }> {
+  return await http(`/api/settings/ai/profiles/${profileId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function deleteAiProfile(profileId: number): Promise<{ message: string }> {
+  return await http(`/api/settings/ai/profiles/${profileId}`, { method: 'DELETE' })
+}
+
+export async function applyAiProfile(profileId: number): Promise<AiProfileApplyResponse> {
+  return await http(`/api/settings/ai/profiles/${profileId}/apply`, { method: 'POST' })
 }
 
 export async function getSystemStatus(): Promise<SystemStatus> {
