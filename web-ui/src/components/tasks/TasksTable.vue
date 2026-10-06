@@ -26,7 +26,8 @@ import {
   Loader2,
   MapPin,
   RefreshCcw,
-  Search
+  Search,
+  Eye
 } from 'lucide-vue-next'
 import { formatCountdown, formatNextRunAbsolute } from '@/lib/taskSchedule'
 
@@ -101,6 +102,7 @@ const emit = defineEmits<{
   (e: 'stop-task', taskId: number): void
   (e: 'edit-task', task: Task): void
   (e: 'refresh-criteria', task: Task): void
+  (e: 'view-criteria', task: Task): void
   (e: 'toggle-enabled', task: Task, enabled: boolean): void
 }>()
 </script>
@@ -232,6 +234,16 @@ const emit = defineEmits<{
                   <div class="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-mono font-semibold text-emerald-700">
                     {{ (task.ai_prompt_criteria_file || 'STANDARD').split('/').pop() }}
                   </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="text-emerald-700 hover:bg-emerald-50"
+                    :aria-label="`${t('tasks.table.viewCriteria')} ${task.task_name}`"
+                    @click="emit('view-criteria', task)"
+                  >
+                    <Eye class="mr-1 h-3.5 w-3.5" />
+                    {{ t('tasks.table.viewCriteria') }}
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -433,6 +445,16 @@ const emit = defineEmits<{
                     >
                       {{ (task.ai_prompt_criteria_file || 'STANDARD').split('/').pop() }}
                     </div>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      class="h-6 text-[9px] font-black text-emerald-600 hover:bg-emerald-50 uppercase tracking-widest px-2" 
+                      :aria-label="`${t('tasks.table.viewCriteria')} ${task.task_name}`"
+                      :title="`${t('tasks.table.viewCriteria')} ${task.task_name}`"
+                      @click="emit('view-criteria', task)"
+                    >
+                      <Eye class="w-2.5 h-2.5 mr-1" /> {{ t('tasks.table.viewCriteria') }}
+                    </Button>
                     <Button 
                       size="sm" 
                       variant="ghost" 

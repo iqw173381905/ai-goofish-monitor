@@ -9,6 +9,7 @@ import TaskCreateDialog from '@/components/tasks/TaskCreateDialog.vue'
 import TasksTable from '@/components/tasks/TasksTable.vue'
 import TaskForm from '@/components/tasks/TaskForm.vue'
 import { listAccounts, type AccountItem } from '@/api/accounts'
+import { getCriteriaContent, type CriteriaContent } from '@/api/tasks'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toast'
@@ -38,6 +39,10 @@ const route = useRoute()
 // State for dialogs
 const isEditDialogOpen = ref(false)
 const isCriteriaDialogOpen = ref(false)
+const isViewCriteriaOpen = ref(false)
+const viewCriteriaTask = ref<Task | null>(null)
+const criteriaContent = ref<CriteriaContent | null>(null)
+const isCriteriaLoading = ref(false)
 const isEditSubmitting = ref(false)
 const selectedTask = ref<Task | null>(null)
 const criteriaTask = ref<Task | null>(null)
@@ -122,6 +127,24 @@ function handleOpenCriteriaDialog(task: Task) {
   isCriteriaDialogOpen.value = true
 }
 
+async function handleViewCriteria(task: Task) {
+  viewCriteriaTask.value = task
+  isViewCriteriaOpen.value = true
+  criteriaContent.value = null
+  isCriteriaLoading.value = true
+  try {
+    criteriaContent.value = await getCriteriaContent(task.id)
+  } catch (e) {
+    toast({
+      title: t('tasks.toasts.loadCriteriaFailed'),
+      description: (e as Error).message,
+      variant: 'destructive',
+    })
+  } finally {
+    isCriteriaLoading.value = false
+  }
+}
+
 async function handleRefreshCriteria() {
   if (!criteriaTask.value) return
   if (!criteriaDescription.value.trim()) {
@@ -173,6 +196,10 @@ const criteriaPolling = ref<number | null>(null)
 // 后端确认完成（generated_at 变化）前，即使轮询拉到 generating=false（后端未置位）也保持"生成中"
 const locallyGenerating = ref<Map<number, { baseline: string | null; since: number }>>(new Map())
 const criteriaDoneNotified = ref<Set<number>>(new Set())
+// 提交后至少等待的秒数：避免"后端尚未置位"的竞态窗口被误判为失败
+const CRITERIA_MIN_WAIT_MS = 15 * 1000
+// 总超时：无论后端状态如何（含 fetchTasks 失败导致列表停在乐观置位的情况），
+// 超过该时长一律判定失败，保证"生成中"永远不会无限期挂起
 const CRITERIA_POLL_TIMEOUT_MS = 5 * 60 * 1000
 
 function stopCriteriaPolling() {
@@ -192,12 +219,27 @@ async function criteriaPollOnce() {
       locallyGenerating.value.delete(id)
       continue
     }
+    // 无条件总超时兜底：即使列表数据因轮询失败而停留在"生成中"旧值，
+    // 也会在超时后明确提示失败并结束，而不是永远转圈
+    if (now - entry.since > CRITERIA_POLL_TIMEOUT_MS) {
+      locallyGenerating.value.delete(id)
+      if (!criteriaDoneNotified.value.has(id)) {
+        criteriaDoneNotified.value.add(id)
+        toast({
+          title: t('tasks.toasts.regenerateFailed'),
+          description: t('tasks.criteria.timeoutHint', { task: task.task_name }),
+          variant: 'destructive',
+        })
+      }
+      continue
+    }
     if (task.criteria_generating) {
       anyPending = true
       continue
     }
-    // 后端已清生成标记：generated_at 相对提交时基线发生变化 → 确认完成
+    // 后端已清生成标记
     if (task.criteria_generated_at && task.criteria_generated_at !== entry.baseline) {
+      // generated_at 相对提交时基线发生变化 → 确认生成完成
       locallyGenerating.value.delete(id)
       if (!criteriaDoneNotified.value.has(id)) {
         criteriaDoneNotified.value.add(id)
@@ -208,14 +250,15 @@ async function criteriaPollOnce() {
       }
       continue
     }
-    // 后端尚未置位（提交后竞态窗口）→ 继续等；超过 5 分钟视为失败
-    if (now - entry.since > CRITERIA_POLL_TIMEOUT_MS) {
+    // 后端清位但 generated_at 未变：可能是提交后尚未置位的竞态窗口，
+    // 超过最小等待后仍如此 → 判定为生成失败（AI 中转超时/出错）
+    if (now - entry.since > CRITERIA_MIN_WAIT_MS) {
       locallyGenerating.value.delete(id)
       if (!criteriaDoneNotified.value.has(id)) {
         criteriaDoneNotified.value.add(id)
         toast({
           title: t('tasks.toasts.regenerateFailed'),
-          description: t('tasks.criteria.doneHint', { task: task.task_name }),
+          description: t('tasks.criteria.failedHint', { task: task.task_name }),
           variant: 'destructive',
         })
       }
@@ -324,6 +367,39 @@ onMounted(fetchAccountOptions)
       </DialogContent>
     </Dialog>
 
+    <!-- View Criteria Content Dialog -->
+    <Dialog v-model:open="isViewCriteriaOpen">
+      <DialogContent class="sm:max-w-[720px] max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{{ t('tasks.criteria.viewTitle', { task: viewCriteriaTask?.task_name || "" }) }}</DialogTitle>
+          <DialogDescription>
+            {{ t('tasks.criteria.viewDescription') }}
+          </DialogDescription>
+        </DialogHeader>
+        <div v-if="isCriteriaLoading" class="py-8 text-center text-sm text-gray-500">
+          {{ t('tasks.criteria.loadingContent') }}
+        </div>
+        <div v-else-if="criteriaContent" class="grid gap-3">
+          <div class="flex items-center gap-2 text-xs text-gray-500">
+            <span class="font-medium">{{ t('tasks.criteria.currentFile') }}:</span>
+            <span class="font-mono">{{ criteriaContent.filename || t('tasks.criteria.noFile') }}</span>
+            <span v-if="criteriaContent.updated_at" class="ml-auto">
+              {{ t('tasks.criteria.updatedAt') }}: {{ criteriaContent.updated_at.replace('T', ' ').slice(0, 19) }}
+            </span>
+          </div>
+          <pre class="whitespace-pre-wrap break-words bg-slate-50 border border-slate-200 rounded-md p-3 text-[12px] leading-relaxed text-slate-700 max-h-[420px] overflow-y-auto">{{ criteriaContent.content || t('tasks.criteria.emptyContent') }}</pre>
+        </div>
+        <div v-else class="py-8 text-center text-sm text-gray-500">
+          {{ t('tasks.criteria.emptyContent') }}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="isViewCriteriaOpen = false">
+            {{ t('common.close') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- Refresh Criteria Dialog -->
     <Dialog v-model:open="isCriteriaDialogOpen">
       <DialogContent class="sm:max-w-[600px]">
@@ -366,6 +442,7 @@ onMounted(fetchAccountOptions)
       @run-task="handleStartTask"
       @stop-task="handleStopTask"
       @refresh-criteria="handleOpenCriteriaDialog"
+      @view-criteria="handleViewCriteria"
       @toggle-enabled="handleToggleEnabled"
     />
 

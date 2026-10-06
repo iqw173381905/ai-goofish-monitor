@@ -37,6 +37,17 @@ export async function updateTask(taskId: number, data: TaskUpdate): Promise<Task
   return result.task
 }
 
+export interface CriteriaContent {
+  filename: string
+  content: string
+  updated_at: string | null
+  size: number
+}
+
+export async function getCriteriaContent(taskId: number): Promise<CriteriaContent> {
+  return await http(`/api/tasks/${taskId}/criteria-content`)
+}
+
 export async function startTask(taskId: number): Promise<void> {
   await http(`/api/tasks/start/${taskId}`, { method: 'POST' })
 }

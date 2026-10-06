@@ -82,10 +82,15 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
+                # 120 秒超时兜底：AI 中转站无响应/排队过久时主动失败，
+                # 避免 generating 状态无限期挂起（前端"生成中"永不结束）。
                 generated = loop.run_until_complete(
-                    generate_criteria(
-                        user_description=description,
-                        reference_file_path="prompts/macbook_criteria.txt",
+                    asyncio.wait_for(
+                        generate_criteria(
+                            user_description=description,
+                            reference_file_path="prompts/macbook_criteria.txt",
+                        ),
+                        timeout=120,
                     )
                 )
             finally:
@@ -293,6 +298,40 @@ async def update_task(
         return {"message": "任务更新成功", "task": serialize_task(task, scheduler_service)}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{task_id}/criteria-content", response_model=dict)
+async def get_task_criteria_content(
+    task_id: int,
+    service: TaskService = Depends(get_task_service),
+):
+    """返回任务当前 AI 分析标准文件内容（供前端"查看标准"弹窗展示）。"""
+    try:
+        task = await service.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务未找到")
+        filename = getattr(task, "ai_prompt_criteria_file", "") or ""
+        content = ""
+        updated_at = getattr(task, "criteria_generated_at", None)
+        if filename:
+            path = filename if os.path.isabs(filename) else os.path.join(os.getcwd(), filename)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    content = f.read()
+        return {
+            "filename": filename,
+            "content": content,
+            "updated_at": updated_at,
+            "size": len(content),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"读取 AI 分析标准内容失败: {str(e)}"
+        print(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
 @router.delete("/{task_id}", response_model=dict)
 async def delete_task(
     task_id: int,
