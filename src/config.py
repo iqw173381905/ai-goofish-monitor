@@ -49,8 +49,8 @@ ENABLE_RESPONSE_FORMAT = os.getenv("ENABLE_RESPONSE_FORMAT", "true").lower() == 
 
 # "最新发布"筛选的时间窗口（分钟）：任务选择"最新"时，仅保留在此窗口内发布的商品。
 # 闲鱼页面"最新"选项实际是"不限时间、按最新排序"，因此需要抓取后按发布时间后过滤，
-# 才能真正得到"刚刚发布"的商品。可在 .env 中用 NEW_PUBLISH_MINUTES 调整（默认 60 分钟）。
-NEW_PUBLISH_MINUTES = int(os.getenv("NEW_PUBLISH_MINUTES", "60"))
+# 才能真正得到"刚刚发布"的商品。可在 .env 中用 NEW_PUBLISH_MINUTES 调整（默认 12 小时 = 720 分钟）。
+NEW_PUBLISH_MINUTES = int(os.getenv("NEW_PUBLISH_MINUTES", "720"))
 
 # --- Headers ---
 IMAGE_DOWNLOAD_HEADERS = {
