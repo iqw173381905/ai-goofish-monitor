@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from typing import List
 import os
+import threading
+import asyncio
 import aiofiles
 from src.api.dependencies import (
     get_process_service,
@@ -28,6 +30,7 @@ from src.services.account_strategy_service import normalize_account_strategy
 from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.price_history_service import delete_price_snapshots
 from src.services.result_storage_service import delete_result_file_records
+from src.infrastructure.persistence.sqlite_connection import sqlite_connection
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 async def _reload_scheduler_if_needed(
@@ -40,6 +43,53 @@ async def _reload_scheduler_if_needed(
 
 def _has_keyword_rules(rules) -> bool:
     return bool(rules and len(rules) > 0)
+
+
+def _regenerate_criteria_in_background(task_id: int, keyword: str, description: str) -> None:
+    """后台重新生成 AI 分析标准：写 prompts 文件并更新 DB 的 ai_prompt_criteria_file。
+
+    切换/更新 AI 模式时不再同步等待 AI 生成（SiliconFlow 生成标准较慢，
+    曾导致 PATCH 保存长时间无响应），改为保存秒回、后台异步生成。
+    """
+    safe_keyword = "".join(
+        c for c in keyword.lower().replace(' ', '_') if c.isalnum() or c in "_-"
+    ).rstrip()
+    output_filename = f"prompts/{safe_keyword}_criteria.txt"
+
+    def worker():
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                generated = loop.run_until_complete(
+                    generate_criteria(
+                        user_description=description,
+                        reference_file_path="prompts/macbook_criteria.txt",
+                    )
+                )
+            finally:
+                loop.close()
+        except Exception as e:
+            print(f"[后台] 生成 AI 分析标准失败 task={task_id}: {e}")
+            return
+        if not generated or not generated.strip():
+            print(f"[后台] AI 返回的分析标准为空 task={task_id}，跳过写入")
+            return
+        try:
+            os.makedirs("prompts", exist_ok=True)
+            with open(output_filename, 'w', encoding='utf-8') as f:
+                f.write(generated)
+            with sqlite_connection() as conn:
+                conn.execute(
+                    "UPDATE tasks SET ai_prompt_criteria_file = ? WHERE id = ?",
+                    (output_filename, task_id),
+                )
+                conn.commit()
+            print(f"[后台] AI 分析标准已生成并保存: {output_filename}")
+        except Exception as e:
+            print(f"[后台] 保存 AI 分析标准失败 task={task_id}: {e}")
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _validate_final_account_strategy(existing_task, task_update: TaskUpdate) -> None:
@@ -182,44 +232,19 @@ async def update_task(
             ):
                 raise HTTPException(status_code=400, detail="关键词模式下至少需要一个关键词。")
         if target_mode == "ai" and (description_changed or switched_to_ai):
-            print(f"检测到任务 {task_id} 需要刷新 AI 标准文件，开始重新生成...")
-            try:
-                description_for_ai = (
-                    task_update.description
-                    if task_update.description is not None
-                    else existing_task.description
-                )
-                if not str(description_for_ai or "").strip():
-                    raise HTTPException(status_code=400, detail="AI 模式下详细需求不能为空。")
-                safe_keyword = "".join(
-                    c for c in existing_task.keyword.lower().replace(' ', '_')
-                    if c.isalnum() or c in "_-"
-                ).rstrip()
-                output_filename = f"prompts/{safe_keyword}_criteria.txt"
-                print(f"目标文件路径: {output_filename}")
-                print("开始调用 AI 生成新的分析标准...")
-                generated_criteria = await generate_criteria(
-                    user_description=description_for_ai,
-                    reference_file_path="prompts/macbook_criteria.txt"
-                )
-                if not generated_criteria or len(generated_criteria.strip()) == 0:
-                    print("AI 返回的内容为空")
-                    raise HTTPException(status_code=500, detail="AI 未能生成分析标准，返回内容为空。")
-                print(f"保存新的分析标准到: {output_filename}")
-                os.makedirs("prompts", exist_ok=True)
-                async with aiofiles.open(output_filename, 'w', encoding='utf-8') as f:
-                    await f.write(generated_criteria)
-                print(f"新的分析标准已保存")
-                task_update.ai_prompt_criteria_file = output_filename
-                print(f"已更新 ai_prompt_criteria_file 字段为: {output_filename}")
-            except HTTPException:
-                raise
-            except Exception as e:
-                error_msg = f"重新生成 criteria 文件时出错: {str(e)}"
-                print(error_msg)
-                import traceback
-                print(traceback.format_exc())
-                raise HTTPException(status_code=500, detail=error_msg)
+            description_for_ai = (
+                task_update.description
+                if task_update.description is not None
+                else existing_task.description
+            )
+            if not str(description_for_ai or "").strip():
+                raise HTTPException(status_code=400, detail="AI 模式下详细需求不能为空。")
+            # 保存秒回：AI 分析标准改在后台异步生成（见 _regenerate_criteria_in_background）
+            _regenerate_criteria_in_background(
+                task_id=task_id,
+                keyword=existing_task.keyword,
+                description=description_for_ai,
+            )
         task = await service.update_task(task_id, task_update)
         await _reload_scheduler_if_needed(service, scheduler_service)
         return {"message": "任务更新成功", "task": serialize_task(task, scheduler_service)}

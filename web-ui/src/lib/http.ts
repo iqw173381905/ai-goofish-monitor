@@ -29,7 +29,12 @@ export async function http(url: string, options: FetchOptions = {}) {
     headers,
   }
 
-  const response = await fetch(fullUrl, config)
+  // 兜底超时：避免任何请求无限转圈（默认 120s，AI 标准生成等耗时操作也不卡界面）
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 120000)
+  config.signal = controller.signal
+
+  const response = await fetch(fullUrl, config).finally(() => clearTimeout(timeoutId))
 
   if (response.status === 401) {
     // Basic Auth failed or session expired
