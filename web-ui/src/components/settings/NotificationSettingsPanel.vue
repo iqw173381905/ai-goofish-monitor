@@ -11,6 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import type { NotificationSettings, NotificationSettingsUpdate, NotificationTestResponse } from '@/api/settings'
+import {
+  isBrowserNotifyEnabled,
+  setBrowserNotifyEnabled,
+  requestBrowserNotifyPermission,
+} from '@/composables/useTaskNotifier'
 
 type ChannelKey = 'ntfy' | 'bark' | 'gotify' | 'wecom' | 'telegram' | 'webhook'
 
@@ -22,6 +27,13 @@ const props = defineProps<{
   testSettings: (payload: { channel?: string; settings: NotificationSettingsUpdate }) => Promise<NotificationTestResponse>
 }>()
 const { t } = useI18n()
+
+const browserNotifyEnabled = ref(isBrowserNotifyEnabled())
+function handleBrowserNotifyToggle(value: boolean) {
+  browserNotifyEnabled.value = value
+  setBrowserNotifyEnabled(value)
+  if (value) requestBrowserNotifyPermission()
+}
 
 const initialValues = reactive<NotificationSettingsUpdate>({})
 const form = reactive<NotificationSettingsUpdate>({})
@@ -228,6 +240,27 @@ function resolveChannelBadge(channel: ChannelKey) {
             {{ t('notifyPanel.configurationNotes') }}
           </div>
           <p class="mt-2 text-sm leading-6 text-slate-300">{{ t('notifyPanel.configurationNotesDescription') }}</p>
+        </div>
+      </CardContent>
+    </Card>
+
+    <!-- 浏览器弹窗通知（本地前端轮询，无需配置第三方渠道） -->
+    <Card class="app-surface overflow-hidden border-l-4 border-l-amber-500">
+      <CardHeader>
+        <CardTitle class="flex items-center gap-2 text-slate-800">
+          <BellRing class="h-4 w-4 text-amber-600" />
+          {{ t('notifyPanel.browser.title') }}
+        </CardTitle>
+        <CardDescription>{{ t('notifyPanel.browser.description') }}</CardDescription>
+      </CardHeader>
+      <CardContent class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div class="space-y-1">
+          <p class="text-sm font-medium text-slate-800">{{ t('notifyPanel.browser.taskDoneNotify') }}</p>
+          <p class="text-xs text-slate-500">{{ t('notifyPanel.browser.taskDoneHint') }}</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <Switch id="browser-notify" :model-value="browserNotifyEnabled" @update:model-value="handleBrowserNotifyToggle" />
+          <Label for="browser-notify" class="text-sm text-slate-700">{{ browserNotifyEnabled ? t('notifyPanel.browser.enabled') : t('notifyPanel.browser.disabled') }}</Label>
         </div>
       </CardContent>
     </Card>
