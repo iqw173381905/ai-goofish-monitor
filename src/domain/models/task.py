@@ -289,9 +289,20 @@ class TaskUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_partial_keyword_payload(self):
-        if self.decision_mode == "keyword" and self.keyword_rules is not None:
-            if not _has_keyword_rules(self.keyword_rules):
-                raise ValueError("关键词判断模式下，至少需要一个关键词。")
+        # 关键词模式下：三组关键词（旧 keyword_rules / 必含 / 可选）只要显式提交了任意一组，
+        # 就必须至少有一个非空关键词；三组都未提交时交给路由层用现有值判断。
+        if self.decision_mode == "keyword":
+            submitted_any = (
+                self.keyword_rules is not None
+                or self.required_keywords is not None
+                or self.optional_keywords is not None
+            )
+            if submitted_any:
+                has_keyword_rules = _has_keyword_rules(self.keyword_rules or [])
+                has_required = bool(self.required_keywords or [])
+                has_optional = bool(self.optional_keywords or [])
+                if not (has_keyword_rules or has_required or has_optional):
+                    raise ValueError("关键词判断模式下，至少需要一个关键词。")
         if self.decision_mode == "ai" and self.description is not None:
             if not str(self.description).strip():
                 raise ValueError("AI 判断模式下，详细需求(description)不能为空。")

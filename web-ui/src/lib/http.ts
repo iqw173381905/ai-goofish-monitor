@@ -40,7 +40,22 @@ export async function http(url: string, options: FetchOptions = {}) {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}))
-    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`)
+    // FastAPI 422/500 的 detail 可能是数组或对象，统一转成可读文本，避免显示 [object Object]
+    const rawDetail = errorData?.detail
+    let message: string
+    if (typeof rawDetail === 'string') {
+      message = rawDetail
+    } else if (Array.isArray(rawDetail)) {
+      message = rawDetail
+        .map((d: any) => d?.msg || d?.message || (d?.loc ? `字段 ${d.loc.join('.')} 错误` : JSON.stringify(d)))
+        .filter(Boolean)
+        .join('；')
+    } else if (rawDetail && typeof rawDetail === 'object') {
+      message = JSON.stringify(rawDetail)
+    } else {
+      message = `HTTP error! status: ${response.status}`
+    }
+    throw new Error(message)
   }
 
   // Handle 204 No Content

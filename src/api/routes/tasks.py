@@ -165,7 +165,21 @@ async def update_task(
                 if task_update.keyword_rules is not None
                 else getattr(existing_task, "keyword_rules", [])
             )
-            if not _has_keyword_rules(final_rules):
+            final_required = (
+                task_update.required_keywords
+                if task_update.required_keywords is not None
+                else getattr(existing_task, "required_keywords", [])
+            )
+            final_optional = (
+                task_update.optional_keywords
+                if task_update.optional_keywords is not None
+                else getattr(existing_task, "optional_keywords", [])
+            )
+            if not (
+                _has_keyword_rules(final_rules)
+                or bool(final_required)
+                or bool(final_optional)
+            ):
                 raise HTTPException(status_code=400, detail="关键词模式下至少需要一个关键词。")
         if target_mode == "ai" and (description_changed or switched_to_ai):
             print(f"检测到任务 {task_id} 需要刷新 AI 标准文件，开始重新生成...")
