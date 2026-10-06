@@ -45,13 +45,19 @@ def _collect_text_fragments(value: Any, bucket: List[str]) -> None:
 
 
 def build_search_text(record: Dict[str, Any]) -> str:
+    """构建关键词匹配文本：只取当前商品自身的内容。
+
+    闲鱼商品描述与标题合并存储（商品标题字段）。刻意排除以下字段，
+    避免匹配到非当前商品的信息导致误命中：
+    - 商品链接 URL（referPageArgs 携带搜索关键词，必然包含规则词）
+    - 卖家发布的商品列表（卖家在售的其它商品，与本商品无关）
+    - 搜索关键字 / 任务名称 / 价格参考等元信息
+    """
     fragments: List[str] = []
     product_info = record.get("商品信息", {})
-    seller_info = record.get("卖家信息", {})
 
     _collect_text_fragments(product_info.get("商品标题"), fragments)
-    _collect_text_fragments(product_info, fragments)
-    _collect_text_fragments(seller_info, fragments)
+    _collect_text_fragments(product_info.get("商品标签"), fragments)
 
     return normalize_text(" ".join(fragments))
 
