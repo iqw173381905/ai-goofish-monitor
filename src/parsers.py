@@ -57,7 +57,9 @@ async def _parse_search_results_json(json_data: dict, source: str) -> list:
                 "卖家昵称": seller,
                 "商品链接": raw_link.replace("fleamarket://", "https://www.goofish.com/"),
                 "发布时间": datetime.fromtimestamp(int(pub_time_ts)/1000).strftime("%Y-%m-%d %H:%M") if pub_time_ts.isdigit() else "未知时间",
-                "商品ID": item_id
+                "商品ID": item_id,
+                # 内部字段：保留原始发布时间戳（毫秒），供"最新发布"过滤等逻辑使用
+                "_publish_ts": int(pub_time_ts) if pub_time_ts.isdigit() else None
             })
         print(f"LOG: ({source}) 成功解析到 {len(page_data)} 条商品基础信息。")
         return page_data

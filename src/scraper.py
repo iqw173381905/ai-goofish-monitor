@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import time
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlencode
@@ -22,6 +23,7 @@ from src.config import (
     AI_DEBUG_MODE,
     DETAIL_API_URL_PATTERN,
     LOGIN_IS_EDGE,
+    NEW_PUBLISH_MINUTES,
     RUN_HEADLESS,
     RUNNING_IN_DOCKER,
     SKIP_AI_ANALYSIS,
@@ -965,6 +967,26 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     basic_items = await _parse_search_results_json(
                         await current_response.json(), f"第 {page_num} 页"
                     )
+                    if basic_items:
+                        # "最新发布"后过滤：闲鱼页面"最新"选项实际是不限时间按最新排序，
+                        # 为真正得到"刚刚发布"的商品，按发布时间只保留 NEW_PUBLISH_MINUTES 分钟内的
+                        if new_publish_option == "最新":
+                            now_ms = int(time.time() * 1000)
+                            cutoff_ms = now_ms - NEW_PUBLISH_MINUTES * 60 * 1000
+                            before_count = len(basic_items)
+                            kept = []
+                            for it in basic_items:
+                                ts = it.get("_publish_ts")
+                                if ts is not None and ts >= cutoff_ms:
+                                    kept.append(it)
+                            basic_items = kept
+                            log_time(
+                                f"最新发布过滤：{before_count} -> {len(basic_items)} "
+                                f"（仅保留最近 {NEW_PUBLISH_MINUTES} 分钟内发布）"
+                            )
+                        # 移除内部字段，避免进入详情/AI 分析/存储下游
+                        for it in basic_items:
+                            it.pop("_publish_ts", None)
                     if not basic_items:
                         break
                     historical_snapshots.extend(
