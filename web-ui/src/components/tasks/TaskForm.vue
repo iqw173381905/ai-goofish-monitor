@@ -277,13 +277,20 @@ function handleSubmit() {
   submitData.decision_mode = decisionMode
   submitData.account_strategy = currentAccountStrategy
   submitData.analyze_images = submitData.analyze_images !== false
-  submitData.keyword_rules = decisionMode === 'keyword' ? keywordRules : []
-  submitData.required_keywords = decisionMode === 'keyword' ? requiredKeywords : []
-  submitData.optional_keywords = decisionMode === 'keyword' ? optionalKeywords : []
-  submitData.optional_min_hits =
-    decisionMode === 'keyword' && optionalKeywords.length > 0
-      ? (optionalMinHitsInput.value ?? null)
-      : null
+  if (decisionMode === 'keyword') {
+    submitData.keyword_rules = keywordRules
+    submitData.required_keywords = requiredKeywords
+    submitData.optional_keywords = optionalKeywords
+    submitData.optional_min_hits =
+      optionalKeywords.length > 0 ? (optionalMinHitsInput.value ?? null) : null
+  } else {
+    // AI 模式不提交关键词字段：后端 exclude_unset 会保留旧值，
+    // 这样从关键词 → AI → 再切回关键词时，之前填的词不会丢
+    delete submitData.keyword_rules
+    delete submitData.required_keywords
+    delete submitData.optional_keywords
+    delete submitData.optional_min_hits
+  }
   if (decisionMode === 'keyword' && !submitData.description) {
     submitData.description = ''
   }
