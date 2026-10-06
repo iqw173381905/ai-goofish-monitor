@@ -69,7 +69,18 @@ export function useTasks() {
       const updatedTask = await taskApi.updateTask(taskId, data)
       const index = tasks.value.findIndex((task) => task.id === updatedTask.id)
       if (index >= 0) {
-        tasks.value[index] = { ...tasks.value[index], ...updatedTask }
+        const prev = tasks.value[index]
+        if (!prev) {
+          tasks.value.push(updatedTask)
+          return
+        }
+        // criteria_generating 合并时保留 OR：本地乐观置位（true）不被后端旧值冲掉，
+        // 因为后台线程在 PATCH 返回后才异步置位 generating
+        tasks.value[index] = {
+          ...prev,
+          ...updatedTask,
+          criteria_generating: prev.criteria_generating || !!updatedTask.criteria_generating,
+        }
       } else {
         tasks.value.push(updatedTask)
       }

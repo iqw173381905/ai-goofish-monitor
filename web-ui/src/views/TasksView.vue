@@ -145,6 +145,17 @@ async function handleRefreshCriteria() {
       title: t('tasks.toasts.regenerateSubmitted'),
       description: t('tasks.criteria.generatingHint'),
     })
+    // 乐观置位：立即在列表显示"生成中"并禁用启动（后端在后台线程异步置位，
+    // 不这样做列表要等下一次刷新才看到变化）
+    const target = tasks.value.find((x) => x.id === criteriaTask.value!.id)
+    if (target) {
+      target.criteria_generating = true
+      locallyGenerating.value.set(target.id, {
+        baseline: target.criteria_generated_at ?? null,
+        since: Date.now(),
+      })
+    }
+    ensureCriteriaPolling()
   } catch (e) {
     toast({
       title: t('tasks.toasts.regenerateFailed'),
@@ -156,53 +167,75 @@ async function handleRefreshCriteria() {
   }
 }
 
-// AI 分析标准生成中：轮询刷新任务列表，完成后 toast 提示
+// AI 分析标准生成中：提交后立即显示"生成中"并轮询刷新，完成后 toast 提示
 const criteriaPolling = ref<number | null>(null)
-const criteriaGeneratingIds = ref<Set<number>>(new Set())
+// 本地乐观标记：记录每个提交过重刷的任务 id → { 提交时 generated_at 基线, 提交时间戳 }
+// 后端确认完成（generated_at 变化）前，即使轮询拉到 generating=false（后端未置位）也保持"生成中"
+const locallyGenerating = ref<Map<number, { baseline: string | null; since: number }>>(new Map())
 const criteriaDoneNotified = ref<Set<number>>(new Set())
+const CRITERIA_POLL_TIMEOUT_MS = 5 * 60 * 1000
 
-watch(
-  tasks,
-  (list) => {
-    const generating = new Set<number>()
-    for (const task of list) {
-      if (task.decision_mode === 'ai' && task.criteria_generating) {
-        generating.add(task.id)
-        criteriaDoneNotified.value.delete(task.id) // 再次生成中，允许下次完成后重新提示
-      }
-    }
-    // 从生成中 → 完成 的任务，弹提示
-    for (const id of criteriaGeneratingIds.value) {
-      if (!generating.has(id) && !criteriaDoneNotified.value.has(id)) {
-        const task = list.find((t) => t.id === id)
-        if (task) {
-          criteriaDoneNotified.value.add(id)
-          toast({
-            title: t('tasks.toasts.regenerateDone'),
-            description: t('tasks.criteria.doneHint', { task: task.task_name }),
-          })
-        }
-      }
-    }
-    criteriaGeneratingIds.value = generating
-    if (generating.size > 0) {
-      if (criteriaPolling.value === null) {
-        criteriaPolling.value = window.setInterval(() => fetchTasks({ silent: true }), 3000)
-      }
-    } else if (criteriaPolling.value !== null) {
-      clearInterval(criteriaPolling.value)
-      criteriaPolling.value = null
-    }
-  },
-  { deep: true },
-)
-
-onUnmounted(() => {
+function stopCriteriaPolling() {
   if (criteriaPolling.value !== null) {
     clearInterval(criteriaPolling.value)
     criteriaPolling.value = null
   }
-})
+}
+
+async function criteriaPollOnce() {
+  await fetchTasks({ silent: true })
+  let anyPending = false
+  const now = Date.now()
+  for (const [id, entry] of [...locallyGenerating.value]) {
+    const task = tasks.value.find((t) => t.id === id)
+    if (!task) {
+      locallyGenerating.value.delete(id)
+      continue
+    }
+    if (task.criteria_generating) {
+      anyPending = true
+      continue
+    }
+    // 后端已清生成标记：generated_at 相对提交时基线发生变化 → 确认完成
+    if (task.criteria_generated_at && task.criteria_generated_at !== entry.baseline) {
+      locallyGenerating.value.delete(id)
+      if (!criteriaDoneNotified.value.has(id)) {
+        criteriaDoneNotified.value.add(id)
+        toast({
+          title: t('tasks.toasts.regenerateDone'),
+          description: t('tasks.criteria.doneHint', { task: task.task_name }),
+        })
+      }
+      continue
+    }
+    // 后端尚未置位（提交后竞态窗口）→ 继续等；超过 5 分钟视为失败
+    if (now - entry.since > CRITERIA_POLL_TIMEOUT_MS) {
+      locallyGenerating.value.delete(id)
+      if (!criteriaDoneNotified.value.has(id)) {
+        criteriaDoneNotified.value.add(id)
+        toast({
+          title: t('tasks.toasts.regenerateFailed'),
+          description: t('tasks.criteria.doneHint', { task: task.task_name }),
+          variant: 'destructive',
+        })
+      }
+      continue
+    }
+    anyPending = true
+  }
+  if (!anyPending && locallyGenerating.value.size === 0) {
+    stopCriteriaPolling()
+  }
+}
+
+function ensureCriteriaPolling() {
+  if (criteriaPolling.value === null) {
+    criteriaPolling.value = window.setInterval(criteriaPollOnce, 3000)
+    criteriaPollOnce() // 立即先拉一次，尽快显示真实状态
+  }
+}
+
+onUnmounted(stopCriteriaPolling)
 
 async function handleStartTask(taskId: number) {
   try {
