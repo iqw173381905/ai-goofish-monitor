@@ -39,6 +39,13 @@ const props = defineProps<Props>()
 const { t } = useI18n()
 const isStopping = (id: number) => props.stoppingIds?.has(id) ?? false
 const isKeywordMode = (task: Task) => task.decision_mode === 'keyword'
+// 策略组数：优先统计新版“必含+可选”双组关键词；旧版单组 keyword_rules 作为回退
+const keywordStrategyCount = (task: Task): number => {
+  const required = Array.isArray(task.required_keywords) ? task.required_keywords.length : 0
+  const optional = Array.isArray(task.optional_keywords) ? task.optional_keywords.length : 0
+  if (required > 0 || optional > 0) return required + optional
+  return task.keyword_rules?.length || 0
+}
 const nowMs = ref(Date.now())
 let timer: number | null = null
 
@@ -405,7 +412,7 @@ const emit = defineEmits<{
             <TableCell class="align-middle text-center">
               <div class="inline-flex flex-col items-center gap-2">
                 <div v-if="isKeywordMode(task)" class="bg-blue-50/30 p-2 rounded-xl border border-blue-100/50">
-                  <div class="text-xs font-black text-blue-600">{{ t('tasks.table.keywordStrategies', { count: task.keyword_rules?.length || 0 }) }}</div>
+                  <div class="text-xs font-black text-blue-600">{{ t('tasks.table.keywordStrategies', { count: keywordStrategyCount(task) }) }}</div>
                   <div class="text-[9px] font-bold text-blue-400/70 uppercase mt-0.5 tracking-tighter">OR Logic</div>
                 </div>
                 <div v-else class="flex flex-col items-center gap-1.5">
