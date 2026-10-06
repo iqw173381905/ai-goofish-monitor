@@ -135,8 +135,16 @@ async function handleRefreshCriteria() {
 
   isCriteriaSubmitting.value = true
   try {
-    await updateTask(criteriaTask.value.id, { description: criteriaDescription.value })
+    // 强制重新生成：即使详细需求未变化也重新生成分析标准
+    await updateTask(criteriaTask.value.id, {
+      description: criteriaDescription.value,
+      regenerate_criteria: true,
+    })
     isCriteriaDialogOpen.value = false
+    toast({
+      title: t('tasks.toasts.regenerateSubmitted'),
+      description: t('tasks.criteria.generatingHint'),
+    })
   } catch (e) {
     toast({
       title: t('tasks.toasts.regenerateFailed'),

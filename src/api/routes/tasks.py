@@ -231,7 +231,9 @@ async def update_task(
                 or bool(final_optional)
             ):
                 raise HTTPException(status_code=400, detail="关键词模式下至少需要一个关键词。")
-        if target_mode == "ai" and (description_changed or switched_to_ai):
+        if target_mode == "ai" and (
+            description_changed or switched_to_ai or task_update.regenerate_criteria is True
+        ):
             description_for_ai = (
                 task_update.description
                 if task_update.description is not None

@@ -256,6 +256,8 @@ class TaskUpdate(BaseModel):
     optional_keywords: Optional[List[str]] = None
     optional_min_hits: Optional[int] = None
     is_running: Optional[bool] = None
+    # 强制重新生成 AI 分析标准（即使 description 未变化也重新生成）
+    regenerate_criteria: Optional[bool] = None
 
     @model_validator(mode="before")
     @classmethod

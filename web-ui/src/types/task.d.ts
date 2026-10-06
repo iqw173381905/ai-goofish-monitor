@@ -26,6 +26,8 @@ export interface Task {
   optional_keywords: string[];
   optional_min_hits: number | null;
   is_running: boolean;
+  // 请求侧字段：置 true 时后端强制重新生成 AI 分析标准（即使描述未变）
+  regenerate_criteria?: boolean;
 }
 
 export type TaskGenerationStatus = 'queued' | 'running' | 'completed' | 'failed';

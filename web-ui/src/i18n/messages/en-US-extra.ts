@@ -9,6 +9,7 @@ const enUSExtra = {
       updateFailed: 'Failed to update task.',
       descriptionRequired: 'Detailed requirement is required.',
       regenerateFailed: 'Failed to regenerate criteria.',
+      regenerateSubmitted: 'Regeneration submitted',
       startFailed: 'Failed to start task.',
       stopFailed: 'Failed to stop task.',
       toggleFailed: 'Failed to update status.',
@@ -18,7 +19,7 @@ const enUSExtra = {
     },
     createDialog: { trigger: '+ New Task', title: 'Create Monitoring Task (AI or Keyword)', submit: 'Create Task', submitting: 'Submitting...' },
     editDialog: { title: 'Edit Task: {task}', save: 'Save Changes' },
-    criteria: { title: 'Regenerate AI Criteria', description: 'Update the detailed requirement to regenerate AI analysis criteria.', descriptionRequired: 'Please provide a new detailed requirement.', action: 'Regenerate', generating: 'Generating...' },
+    criteria: { title: 'Regenerate AI Criteria', description: 'Update the detailed requirement to regenerate AI analysis criteria.', descriptionRequired: 'Please provide a new detailed requirement.', action: 'Regenerate', generating: 'Generating...', generatingHint: 'AI criteria is being regenerated in the background (10-60s). It will take effect on the next task run.' },
     deleteDialog: { title: 'Delete Task', descriptionWithTask: 'Delete task "{task}"? This action cannot be undone.', descriptionFallback: 'Delete this task? This action cannot be undone.', confirm: 'Delete' },
     generation: {
       title: 'Task Generation Progress',
