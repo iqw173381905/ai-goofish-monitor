@@ -223,6 +223,10 @@ async function criteriaPollOnce() {
     // 也会在超时后明确提示失败并结束，而不是永远转圈
     if (now - entry.since > CRITERIA_POLL_TIMEOUT_MS) {
       locallyGenerating.value.delete(id)
+      // 强制解除本地"生成中"：后端 worker 可能已卡死（AI 中转无响应）无法清位，
+      // 本地将其视为失败，徽标消失、启动按钮恢复可用
+      const stuck = tasks.value.find((x) => x.id === id)
+      if (stuck) stuck.criteria_generating = false
       if (!criteriaDoneNotified.value.has(id)) {
         criteriaDoneNotified.value.add(id)
         toast({

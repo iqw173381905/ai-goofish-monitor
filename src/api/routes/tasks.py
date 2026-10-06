@@ -8,6 +8,7 @@ import os
 import threading
 import asyncio
 import aiofiles
+from datetime import datetime
 from src.api.dependencies import (
     get_process_service,
     get_scheduler_service,
@@ -60,13 +61,16 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
     output_filename = f"prompts/{safe_keyword}_criteria.txt"
 
     def _set_generating(value: bool) -> None:
-        """置位/清位 criteria_generating，带重试兜底（Windows 上偶发 sqlite 写锁）。"""
+        """置位/清位 criteria_generating，带重试兜底（Windows 上偶发 sqlite 写锁）。
+        置位时记录 criteria_generating_since（生成开始时间），用于识别 worker 卡死
+        产生的 stale 标记（AI 中转无响应时，start_task 据此放行启动）。"""
+        since_value = datetime.now().isoformat(timespec="seconds") if value else None
         for attempt in range(3):
             try:
                 with sqlite_connection() as conn:
                     conn.execute(
-                        "UPDATE tasks SET criteria_generating = ? WHERE id = ?",
-                        (1 if value else 0, task_id),
+                        "UPDATE tasks SET criteria_generating = ?, criteria_generating_since = ? WHERE id = ?",
+                        (1 if value else 0, since_value, task_id),
                     )
                     conn.commit()
                 return
@@ -113,7 +117,7 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
                 try:
                     with sqlite_connection() as conn:
                         conn.execute(
-                            "UPDATE tasks SET ai_prompt_criteria_file = ?, criteria_generating = 0, criteria_generated_at = ? WHERE id = ?",
+                            "UPDATE tasks SET ai_prompt_criteria_file = ?, criteria_generating = 0, criteria_generating_since = NULL, criteria_generated_at = ? WHERE id = ?",
                             (
                                 output_filename,
                                 datetime.now().isoformat(timespec="seconds"),
@@ -384,14 +388,34 @@ async def start_task(
         raise HTTPException(status_code=400, detail="任务已被禁用，无法启动")
     if task.is_running:
         raise HTTPException(status_code=400, detail="任务已在运行中")
-    if (
-        (task.decision_mode or "ai") == "ai"
-        and getattr(task, "criteria_generating", False)
+    if (task.decision_mode or "ai") == "ai" and getattr(
+        task, "criteria_generating", False
     ):
-        raise HTTPException(
-            status_code=400,
-            detail="AI 分析标准正在生成中，请等待生成完成后再启动任务。",
-        )
+        # stale 检测：生成标记超过 10 分钟未完成视为 worker 卡死（AI 中转无响应）。
+        # 此时清除标记并放行启动，避免"生成中"永远阻塞启动按钮。
+        since_text = getattr(task, "criteria_generating_since", None)
+        stale = True
+        if since_text:
+            try:
+                since_dt = datetime.fromisoformat(since_text)
+                stale = (datetime.now() - since_dt).total_seconds() > 600
+            except (ValueError, TypeError):
+                stale = True
+        if stale:
+            try:
+                with sqlite_connection() as conn:
+                    conn.execute(
+                        "UPDATE tasks SET criteria_generating = 0, criteria_generating_since = NULL WHERE id = ?",
+                        (task_id,),
+                    )
+                    conn.commit()
+            except Exception as e:
+                print(f"清除卡死的生成标记失败 task={task_id}: {e}")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="AI 分析标准正在生成中，请等待生成完成后再启动任务。",
+            )
     success = await process_service.start_task(task_id, task.task_name)
     if not success:
         raise HTTPException(status_code=500, detail="启动任务失败")

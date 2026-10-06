@@ -41,9 +41,20 @@ const props = defineProps<Props>()
 const { t } = useI18n()
 const isStopping = (id: number) => props.stoppingIds?.has(id) ?? false
 const isKeywordMode = (task: Task) => task.decision_mode === 'keyword'
+// AI 模式标准生成中超过 10 分钟 → 视为 stale（后端 worker 卡死/AI 中转无响应），
+// 徽标隐藏、启动按钮恢复可用；正常生成中则保持禁用。
+// 注意：criteria_generating_since 为空但 generating=true 的标记（旧版本遗留/迁移前卡死）
+// 一律视为 stale，避免"生成中"永久占用启动按钮。
+const isCriteriaGeneratingStale = (task: Task): boolean => {
+  if (!task.criteria_generating) return false
+  if (!task.criteria_generating_since) return true
+  const since = Date.parse(task.criteria_generating_since)
+  if (!Number.isFinite(since)) return true
+  return nowMs.value - since > 10 * 60 * 1000
+}
 // AI 模式下标准生成中 → 禁用启动
 const isStartBlocked = (task: Task): boolean =>
-  !isKeywordMode(task) && !!task.criteria_generating
+  !isKeywordMode(task) && !!task.criteria_generating && !isCriteriaGeneratingStale(task)
 // 策略组数：优先统计新版“必含+可选”双组关键词；旧版单组 keyword_rules 作为回退
 const keywordStrategyCount = (task: Task): number => {
   const required = Array.isArray(task.required_keywords) ? task.required_keywords.length : 0
@@ -433,7 +444,7 @@ const emit = defineEmits<{
                   <div class="text-[9px] font-bold text-blue-400/70 uppercase mt-0.5 tracking-tighter">OR Logic</div>
                 </div>
                 <div v-else class="flex flex-col items-center gap-1.5">
-                  <div v-if="task.criteria_generating"
+                  <div v-if="task.criteria_generating && !isCriteriaGeneratingStale(task)"
                     class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-amber-50 border border-amber-200/70 text-[10px] font-black text-amber-600"
                   >
                     <Loader2 class="w-3 h-3 animate-spin" /> {{ t('tasks.table.criteriaGenerating') }}

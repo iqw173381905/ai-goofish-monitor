@@ -98,7 +98,12 @@ class AIClient:
 
             return AsyncOpenAI(
                 api_key=self.settings.api_key,
-                base_url=self.settings.base_url
+                base_url=self.settings.base_url,
+                # 传输层超时兜底：中转站无响应/排队挂起时 120 秒强制失败，
+                # 避免协程永久卡死导致 criteria_generating 永不清位（前端"生成中"卡死）。
+                # 同时关闭 SDK 自带重试，防止超时时间与重试叠加。
+                timeout=120.0,
+                max_retries=0,
             )
         except Exception as e:
             print(f"初始化 AI 客户端失败: {e}")

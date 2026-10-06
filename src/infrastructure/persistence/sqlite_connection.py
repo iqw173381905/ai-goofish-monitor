@@ -160,6 +160,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _migrate_result_items_status(conn)
     _migrate_task_keyword_columns(conn)
     _migrate_task_criteria_status(conn)
+    _migrate_task_criteria_since(conn)
     conn.commit()
 
 
@@ -223,6 +224,23 @@ def _migrate_task_criteria_status(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN criteria_generated_at TEXT")
     conn.execute(
         "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_criteria_status', 'done')"
+    )
+
+
+def _migrate_task_criteria_since(conn: sqlite3.Connection) -> None:
+    """为 tasks 表添加 criteria_generating_since 列：记录生成中状态的开始时间，
+    用于识别 worker 卡死（AI 中转无响应）导致的 stale 生成标记，
+    start_task 据此判断放行。"""
+    row = conn.execute(
+        "SELECT value FROM app_metadata WHERE key = 'migration:task_criteria_since'"
+    ).fetchone()
+    if row is not None:
+        return
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "criteria_generating_since" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN criteria_generating_since TEXT")
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_criteria_since', 'done')"
     )
 
 
