@@ -26,6 +26,9 @@ export interface Task {
   optional_keywords: string[];
   optional_min_hits: number | null;
   is_running: boolean;
+  // AI 分析标准生成状态：生成中为 true；criteria_generated_at 为最近生成完成时间
+  criteria_generating?: boolean;
+  criteria_generated_at?: string | null;
   // 请求侧字段：置 true 时后端强制重新生成 AI 分析标准（即使描述未变）
   regenerate_criteria?: boolean;
 }

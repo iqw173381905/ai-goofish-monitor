@@ -23,6 +23,7 @@ import {
   Keyboard,
   Clock,
   Layers,
+  Loader2,
   MapPin,
   RefreshCcw,
   Search
@@ -39,6 +40,9 @@ const props = defineProps<Props>()
 const { t } = useI18n()
 const isStopping = (id: number) => props.stoppingIds?.has(id) ?? false
 const isKeywordMode = (task: Task) => task.decision_mode === 'keyword'
+// AI 模式下标准生成中 → 禁用启动
+const isStartBlocked = (task: Task): boolean =>
+  !isKeywordMode(task) && !!task.criteria_generating
 // 策略组数：优先统计新版“必含+可选”双组关键词；旧版单组 keyword_rules 作为回退
 const keywordStrategyCount = (task: Task): number => {
   const required = Array.isArray(task.required_keywords) ? task.required_keywords.length : 0
@@ -248,12 +252,13 @@ const emit = defineEmits<{
               v-if="!task.is_running"
               size="sm"
               class="flex-1 min-w-[120px]"
-              :class="task.enabled ? '' : 'pointer-events-none opacity-50'"
+              :class="task.enabled && !isStartBlocked(task) ? '' : 'pointer-events-none opacity-50'"
               :aria-label="`${t('tasks.table.start')} ${task.task_name}`"
               @click="emit('run-task', task.id)"
             >
-              <Play class="mr-1 h-3.5 w-3.5 fill-current" />
-              {{ t('tasks.table.start') }}
+              <Loader2 v-if="isStartBlocked(task)" class="mr-1 h-3.5 w-3.5 animate-spin" />
+              <Play v-else class="mr-1 h-3.5 w-3.5 fill-current" />
+              {{ isStartBlocked(task) ? t('tasks.table.criteriaGenerating') : t('tasks.table.start') }}
             </Button>
             <Button
               v-else
@@ -416,22 +421,29 @@ const emit = defineEmits<{
                   <div class="text-[9px] font-bold text-blue-400/70 uppercase mt-0.5 tracking-tighter">OR Logic</div>
                 </div>
                 <div v-else class="flex flex-col items-center gap-1.5">
-                  <div 
-                    class="px-2 py-1 rounded bg-emerald-50/50 border border-emerald-100/50 text-[9px] font-mono font-black text-emerald-600 truncate max-w-[140px]"
-                    :title="task.ai_prompt_criteria_file"
+                  <div v-if="task.criteria_generating"
+                    class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-amber-50 border border-amber-200/70 text-[10px] font-black text-amber-600"
                   >
-                    {{ (task.ai_prompt_criteria_file || 'STANDARD').split('/').pop() }}
+                    <Loader2 class="w-3 h-3 animate-spin" /> {{ t('tasks.table.criteriaGenerating') }}
                   </div>
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    class="h-6 text-[9px] font-black text-emerald-600 hover:bg-emerald-50 uppercase tracking-widest px-2" 
-                    :aria-label="`${t('tasks.table.refreshCriteria')} ${task.task_name}`"
-                    :title="`${t('tasks.table.refreshCriteria')} ${task.task_name}`"
-                    @click="emit('refresh-criteria', task)"
-                  >
-                    <RefreshCcw class="w-2.5 h-2.5 mr-1" /> {{ t('tasks.table.refreshCriteria') }}
-                  </Button>
+                  <template v-else>
+                    <div 
+                      class="px-2 py-1 rounded bg-emerald-50/50 border border-emerald-100/50 text-[9px] font-mono font-black text-emerald-600 truncate max-w-[140px]"
+                      :title="task.ai_prompt_criteria_file"
+                    >
+                      {{ (task.ai_prompt_criteria_file || 'STANDARD').split('/').pop() }}
+                    </div>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      class="h-6 text-[9px] font-black text-emerald-600 hover:bg-emerald-50 uppercase tracking-widest px-2" 
+                      :aria-label="`${t('tasks.table.refreshCriteria')} ${task.task_name}`"
+                      :title="`${t('tasks.table.refreshCriteria')} ${task.task_name}`"
+                      @click="emit('refresh-criteria', task)"
+                    >
+                      <RefreshCcw class="w-2.5 h-2.5 mr-1" /> {{ t('tasks.table.refreshCriteria') }}
+                    </Button>
+                  </template>
                 </div>
               </div>
             </TableCell>
@@ -475,12 +487,13 @@ const emit = defineEmits<{
                     size="sm" 
                     variant="default"
                     class="h-8 px-3 rounded-lg shadow-sm transition-all active:scale-95 text-white border-none"
-                    :class="task.enabled ? 'bg-primary hover:bg-primary/90' : 'bg-slate-200 text-slate-400 pointer-events-none opacity-50'"
+                    :class="task.enabled && !isStartBlocked(task) ? 'bg-primary hover:bg-primary/90' : 'bg-slate-200 text-slate-400 pointer-events-none opacity-50'"
                     :aria-label="`${t('tasks.table.start')} ${task.task_name}`"
                     @click="emit('run-task', task.id)"
                   >
-                  <Play class="w-3 h-3 mr-1.5 fill-current" />
-                  <span class="font-bold text-[11px]">{{ t('tasks.table.start') }}</span>
+                  <Loader2 v-if="isStartBlocked(task)" class="w-3 h-3 mr-1.5 animate-spin" />
+                  <Play v-else class="w-3 h-3 mr-1.5 fill-current" />
+                  <span class="font-bold text-[11px]">{{ isStartBlocked(task) ? t('tasks.table.criteriaGenerating') : t('tasks.table.start') }}</span>
                 </Button>
                   <Button
                     v-else

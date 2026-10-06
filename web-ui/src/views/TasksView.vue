@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useTasks } from '@/composables/useTasks'
@@ -155,6 +155,54 @@ async function handleRefreshCriteria() {
     isCriteriaSubmitting.value = false
   }
 }
+
+// AI 分析标准生成中：轮询刷新任务列表，完成后 toast 提示
+const criteriaPolling = ref<number | null>(null)
+const criteriaGeneratingIds = ref<Set<number>>(new Set())
+const criteriaDoneNotified = ref<Set<number>>(new Set())
+
+watch(
+  tasks,
+  (list) => {
+    const generating = new Set<number>()
+    for (const task of list) {
+      if (task.decision_mode === 'ai' && task.criteria_generating) {
+        generating.add(task.id)
+        criteriaDoneNotified.value.delete(task.id) // 再次生成中，允许下次完成后重新提示
+      }
+    }
+    // 从生成中 → 完成 的任务，弹提示
+    for (const id of criteriaGeneratingIds.value) {
+      if (!generating.has(id) && !criteriaDoneNotified.value.has(id)) {
+        const task = list.find((t) => t.id === id)
+        if (task) {
+          criteriaDoneNotified.value.add(id)
+          toast({
+            title: t('tasks.toasts.regenerateDone'),
+            description: t('tasks.criteria.doneHint', { task: task.task_name }),
+          })
+        }
+      }
+    }
+    criteriaGeneratingIds.value = generating
+    if (generating.size > 0) {
+      if (criteriaPolling.value === null) {
+        criteriaPolling.value = window.setInterval(() => fetchTasks({ silent: true }), 3000)
+      }
+    } else if (criteriaPolling.value !== null) {
+      clearInterval(criteriaPolling.value)
+      criteriaPolling.value = null
+    }
+  },
+  { deep: true },
+)
+
+onUnmounted(() => {
+  if (criteriaPolling.value !== null) {
+    clearInterval(criteriaPolling.value)
+    criteriaPolling.value = null
+  }
+})
 
 async function handleStartTask(taskId: number) {
   try {

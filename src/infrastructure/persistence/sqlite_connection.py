@@ -159,6 +159,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
     _migrate_result_items_status(conn)
     _migrate_task_keyword_columns(conn)
+    _migrate_task_criteria_status(conn)
     conn.commit()
 
 
@@ -203,6 +204,25 @@ def _migrate_task_keyword_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN optional_min_hits INTEGER")
     conn.execute(
         "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_keyword_columns', 'done')"
+    )
+
+
+def _migrate_task_criteria_status(conn: sqlite3.Connection) -> None:
+    """为 tasks 表添加 AI 标准生成状态列（仅执行一次，兼容旧库）。"""
+    row = conn.execute(
+        "SELECT value FROM app_metadata WHERE key = 'migration:task_criteria_status'"
+    ).fetchone()
+    if row is not None:
+        return
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "criteria_generating" not in cols:
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN criteria_generating INTEGER NOT NULL DEFAULT 0"
+        )
+    if "criteria_generated_at" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN criteria_generated_at TEXT")
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_criteria_status', 'done')"
     )
 
 

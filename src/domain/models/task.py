@@ -133,6 +133,9 @@ class Task(BaseModel):
     optional_keywords: List[str] = Field(default_factory=list)
     optional_min_hits: Optional[int] = None
     is_running: bool = False
+    # AI 分析标准生成状态：生成中为 True；criteria_generated_at 记录最近一次生成完成时间
+    criteria_generating: bool = False
+    criteria_generated_at: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod

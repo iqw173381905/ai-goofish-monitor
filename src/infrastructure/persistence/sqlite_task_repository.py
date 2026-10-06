@@ -28,6 +28,8 @@ def _row_to_task(row) -> Task:
         payload.pop("optional_keywords_json", None) or "[]"
     )
     payload.setdefault("optional_min_hits", None)
+    payload["criteria_generating"] = bool(payload.get("criteria_generating", False))
+    payload.setdefault("criteria_generated_at", None)
     return Task(**payload)
 
 

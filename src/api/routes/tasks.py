@@ -50,13 +50,34 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
 
     切换/更新 AI 模式时不再同步等待 AI 生成（SiliconFlow 生成标准较慢，
     曾导致 PATCH 保存长时间无响应），改为保存秒回、后台异步生成。
+    生成期间置 criteria_generating=1，前端据此禁用启动并展示生成中状态。
     """
+    from datetime import datetime
+
     safe_keyword = "".join(
         c for c in keyword.lower().replace(' ', '_') if c.isalnum() or c in "_-"
     ).rstrip()
     output_filename = f"prompts/{safe_keyword}_criteria.txt"
 
+    def _set_generating(value: bool) -> None:
+        try:
+            with sqlite_connection() as conn:
+                if value:
+                    conn.execute(
+                        "UPDATE tasks SET criteria_generating = 1 WHERE id = ?",
+                        (task_id,),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE tasks SET criteria_generating = 0 WHERE id = ?",
+                        (task_id,),
+                    )
+                conn.commit()
+        except Exception as e:
+            print(f"[后台] 更新 criteria 状态失败 task={task_id}: {e}")
+
     def worker():
+        _set_generating(True)
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -71,9 +92,11 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
                 loop.close()
         except Exception as e:
             print(f"[后台] 生成 AI 分析标准失败 task={task_id}: {e}")
+            _set_generating(False)
             return
         if not generated or not generated.strip():
             print(f"[后台] AI 返回的分析标准为空 task={task_id}，跳过写入")
+            _set_generating(False)
             return
         try:
             os.makedirs("prompts", exist_ok=True)
@@ -81,13 +104,14 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
                 f.write(generated)
             with sqlite_connection() as conn:
                 conn.execute(
-                    "UPDATE tasks SET ai_prompt_criteria_file = ? WHERE id = ?",
-                    (output_filename, task_id),
+                    "UPDATE tasks SET ai_prompt_criteria_file = ?, criteria_generating = 0, criteria_generated_at = ? WHERE id = ?",
+                    (output_filename, datetime.now().isoformat(timespec="seconds"), task_id),
                 )
                 conn.commit()
             print(f"[后台] AI 分析标准已生成并保存: {output_filename}")
         except Exception as e:
             print(f"[后台] 保存 AI 分析标准失败 task={task_id}: {e}")
+            _set_generating(False)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -304,6 +328,14 @@ async def start_task(
         raise HTTPException(status_code=400, detail="任务已被禁用，无法启动")
     if task.is_running:
         raise HTTPException(status_code=400, detail="任务已在运行中")
+    if (
+        (task.decision_mode or "ai") == "ai"
+        and getattr(task, "criteria_generating", False)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="AI 分析标准正在生成中，请等待生成完成后再启动任务。",
+        )
     success = await process_service.start_task(task_id, task.task_name)
     if not success:
         raise HTTPException(status_code=500, detail="启动任务失败")
