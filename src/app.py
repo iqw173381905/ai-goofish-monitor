@@ -2,10 +2,22 @@
 新架构的主应用入口
 整合所有路由和服务
 """
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+# 禁用 uvicorn 自身的日志输出（access/error/启动横幅）。
+# 原因：Windows 下以 pythonw 隐藏窗口运行时无有效 stdout/stderr，
+# uvicorn 写访问日志时触发 "underlying buffer has been detached"，
+# 异常抛进事件循环导致整个服务崩溃、被 watchdog 反复重启。
+# 应用自身的日志不受影响（任务日志走文件，业务输出走 print/独立 logger）。
+for _uvicorn_logger_name in ("uvicorn", "uvicorn.access", "uvicorn.error", "uvicorn.asgi"):
+    _uvicorn_logger = logging.getLogger(_uvicorn_logger_name)
+    _uvicorn_logger.handlers = []
+    _uvicorn_logger.propagate = False
+    _uvicorn_logger.disabled = True
 
 from src.api.routes import (
     dashboard,
