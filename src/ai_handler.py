@@ -361,8 +361,38 @@ async def send_ntfy_notification(product_data, reason):
     return results
 
 
-async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
-    """将完整的商品JSON数据和所有图片发送给 AI 进行分析（异步）。"""
+def _summarize_product_json(product_data: dict) -> str:
+    """提取商品关键字段并紧凑序列化，大幅缩短 AI 请求文本（长 JSON 会导致中转超时）"""
+    try:
+        info = product_data.get("商品信息") or {}
+        seller = product_data.get("卖家信息") or {}
+        keep = {
+            "商品标题": info.get("商品标题"),
+            "当前售价": info.get("当前售价"),
+            "商品原价": info.get("商品原价"),
+            "商品标签": info.get("商品标签"),
+            "发货地区": info.get("发货地区"),
+            "发布时间": info.get("发布时间"),
+            "浏览量": info.get("浏览量"),
+            "卖家昵称": seller.get("卖家昵称") or product_data.get("seller_nickname"),
+            "卖家信用": seller.get("卖家信用"),
+            "卖家等级": seller.get("卖家等级"),
+        }
+        if not info:
+            for k in ("title", "价格", "price", "描述", "desc", "description"):
+                if k in product_data:
+                    keep.setdefault(k, product_data[k])
+        compact = {k: v for k, v in keep.items() if v not in (None, "", [], {})}
+        return json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        return json.dumps(product_data, ensure_ascii=False, separators=(",", ":"))
+
+
+async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_urls=None):
+    """将完整的商品JSON数据和所有图片发送给 AI 进行分析（异步）。
+
+    优先使用图片 URL 直传（image_urls，中转处理快、不下载）；无 URL 时才回退本地 base64。
+    """
     if not client:
         safe_print("   [AI分析] 错误：AI客户端未初始化，跳过分析。")
         return None
@@ -370,15 +400,23 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
     item_info = product_data.get('商品信息', {})
     product_id = item_info.get('商品ID', 'N/A')
 
-    safe_print(f"\n   [AI分析] 开始分析商品 #{product_id} (含 {len(image_paths or [])} 张图片)...")
+    # 规范化远程图片 URL（兼容字符串/列表）
+    remote_urls = []
+    if image_urls:
+        raw_list = image_urls if isinstance(image_urls, list) else [image_urls]
+        for u in raw_list:
+            if isinstance(u, str) and u.strip().startswith("http"):
+                remote_urls.append(u.strip())
+
+    safe_print(f"\n   [AI分析] 开始分析商品 #{product_id} (含 {len(remote_urls or [])} 张图片, URL直传)...")
     safe_print(f"   [AI分析] 标题: {item_info.get('商品标题', '无')}")
 
     if not prompt_text:
         safe_print("   [AI分析] 错误：未提供AI分析所需的prompt文本。")
         return None
 
-    product_details_json = json.dumps(product_data, ensure_ascii=False, indent=2)
-    system_prompt = prompt_text
+    # 精简商品 JSON：只保留关键字段 + 紧凑格式（长 JSON + indent 会显著拖慢中转响应）
+    product_details_json = _summarize_product_json(product_data)
 
     if AI_DEBUG_MODE:
         safe_print("\n--- [AI DEBUG] ---")
@@ -389,7 +427,7 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
         safe_print("-------------------\n")
 
     image_data_urls = []
-    if image_paths:
+    if not remote_urls and image_paths:
         for path in image_paths:
             base64_image = encode_image_to_base64(path)
             if base64_image:
@@ -397,10 +435,10 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
 
     combined_text_prompt = build_analysis_text_prompt(
         product_details_json,
-        system_prompt,
-        include_images=bool(image_data_urls),
+        prompt_text,
+        include_images=bool(remote_urls or image_data_urls),
     )
-    user_content = build_user_message_content(combined_text_prompt, image_data_urls)
+    user_content = build_user_message_content(combined_text_prompt, remote_urls or image_data_urls)
     messages = [{"role": "user", "content": user_content}]
 
     # 保存最终传输内容到日志文件
@@ -421,7 +459,8 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
             "task_name": task_name,
             "product_id": product_id,
             "title": item_info.get("商品标题", "无"),
-            "image_count": len(image_data_urls),
+            "image_count": len(remote_urls or image_data_urls),
+            "image_mode": "url" if remote_urls else ("base64" if image_data_urls else "none"),
         }
         log_content = json.dumps(log_payload, ensure_ascii=False)
 
@@ -451,7 +490,7 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
                 model=MODEL_NAME,
                 messages=messages,
                 temperature=current_temperature,
-                max_output_tokens=4000,
+                max_output_tokens=1200,
                 enable_json_output=use_response_format,
             )
             if not use_temperature:

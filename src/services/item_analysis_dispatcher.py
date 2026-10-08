@@ -132,10 +132,13 @@ class ItemAnalysisDispatcher:
     async def _run_ai_analysis(self, job: ItemAnalysisJob, record: dict) -> dict:
         image_paths: list[str] = []
         try:
-            image_paths = await self._download_images(job, record)
+            image_urls = self._get_image_urls(record)
+            # 优先图片 URL 直传（中转处理快）；URL 为空时才下载本地图作 base64 回退
+            if not image_urls and job.analyze_images:
+                image_paths = await self._download_images(job, record)
             if not job.prompt_text:
                 return self._build_ai_error_result("任务未配置AI prompt，跳过分析。")
-            ai_result = await self._ai_analyzer(record, image_paths, job.prompt_text)
+            ai_result = await self._ai_analyzer(record, image_paths, job.prompt_text, image_urls=image_urls)
             if not ai_result:
                 return self._build_ai_error_result(
                     "AI analysis returned None after retries.",
@@ -151,6 +154,21 @@ class ItemAnalysisDispatcher:
             )
         finally:
             self._cleanup_images(image_paths)
+
+    @staticmethod
+    def _get_image_urls(record: dict) -> list[str]:
+        """从商品记录提取图片 URL 列表（兼容字符串/列表两种存储格式）"""
+        try:
+            item_data = record.get("商品信息", {}) or {}
+            raw = item_data.get("商品图片列表")
+            if isinstance(raw, str) and raw.startswith("["):
+                import json as _json
+                raw = _json.loads(raw)
+            if not isinstance(raw, list):
+                return []
+            return [str(u).strip() for u in raw if isinstance(u, str) and u.strip().startswith("http")]
+        except Exception:
+            return []
 
     async def _download_images(self, job: ItemAnalysisJob, record: dict) -> list[str]:
         if not job.analyze_images:

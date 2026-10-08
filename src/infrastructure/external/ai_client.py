@@ -141,15 +141,17 @@ class AIClient:
         self,
         product_data: Dict,
         image_paths: List[str],
-        prompt_text: str
+        prompt_text: str,
+        image_urls: Optional[List[str]] = None,
     ) -> Optional[Dict]:
         """
         分析商品数据
 
         Args:
             product_data: 商品数据
-            image_paths: 图片路径列表
+            image_paths: 图片路径列表（本地文件，base64 方式，优先级低于 image_urls）
             prompt_text: 分析提示词
+            image_urls: 图片 URL 列表（远程直传，推荐：中转对 base64 兼容差且慢）
 
         Returns:
             分析结果
@@ -159,28 +161,69 @@ class AIClient:
             return None
 
         try:
-            messages = self._build_messages(product_data, image_paths, prompt_text)
+            messages = self._build_messages(product_data, image_paths, prompt_text, image_urls)
             response = await self._call_ai(messages)
             return self._parse_response(response)
         except Exception as e:
             print(f"AI 分析失败: {e}")
             return None
 
-    def _build_messages(self, product_data: Dict, image_paths: List[str], prompt_text: str) -> List[Dict]:
-        """构建 AI 消息"""
-        product_json = json.dumps(product_data, ensure_ascii=False, indent=2)
+    @staticmethod
+    def _summarize_product(product_data: Dict) -> str:
+        """提取关键字段并紧凑序列化，大幅缩短请求文本（长 JSON 会导致中转超时）"""
+        try:
+            info = product_data.get("商品信息") or {}
+            seller = product_data.get("卖家信息") or {}
+            keep = {
+                "商品标题": info.get("商品标题"),
+                "当前售价": info.get("当前售价"),
+                "商品原价": info.get("商品原价"),
+                "商品标签": info.get("商品标签"),
+                "发货地区": info.get("发货地区"),
+                "发布时间": info.get("发布时间"),
+                "浏览量": info.get("浏览量"),
+                "卖家昵称": seller.get("卖家昵称"),
+                "卖家信用": seller.get("卖家信用"),
+                "卖家等级": seller.get("卖家等级"),
+            }
+            # 兼容无嵌套结构的平铺 product_data（旧调用方）
+            if not info:
+                for k in ("title", "价格", "price", "描述", "desc", "description"):
+                    if k in product_data:
+                        keep.setdefault(k, product_data[k])
+            compact = {k: v for k, v in keep.items() if v not in (None, "", [], {})}
+            return json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+        except Exception:
+            return json.dumps(product_data, ensure_ascii=False, separators=(",", ":"))
+
+    def _build_messages(
+        self,
+        product_data: Dict,
+        image_paths: List[str],
+        prompt_text: str,
+        image_urls: Optional[List[str]] = None,
+    ) -> List[Dict]:
+        """构建 AI 消息：优先图片 URL 直传（不下载、不 base64，中转处理快）"""
+        product_json = self._summarize_product(product_data)
+
+        remote_urls: List[str] = []
+        for url in (image_urls or []):
+            if isinstance(url, str) and url.startswith("http"):
+                remote_urls.append(url)
+
         image_data_urls: List[str] = []
-        for path in image_paths:
-            base64_img = self.encode_image(path)
-            if base64_img:
-                image_data_urls.append(f"data:image/jpeg;base64,{base64_img}")
+        if not remote_urls:
+            for path in image_paths:
+                base64_img = self.encode_image(path)
+                if base64_img:
+                    image_data_urls.append(f"data:image/jpeg;base64,{base64_img}")
 
         text_prompt = build_analysis_text_prompt(
             product_json,
             prompt_text,
-            include_images=bool(image_data_urls),
+            include_images=bool(remote_urls or image_data_urls),
         )
-        user_content = build_user_message_content(text_prompt, image_data_urls)
+        user_content = build_user_message_content(text_prompt, remote_urls or image_data_urls)
         return [{"role": "user", "content": user_content}]
 
     async def _call_ai(
@@ -188,7 +231,7 @@ class AIClient:
         messages: List[Dict],
         *,
         temperature: float = 0.1,
-        max_output_tokens: int = 4000,
+        max_output_tokens: int = 1200,
         enable_json_output: Optional[bool] = None,
     ) -> str:
         """调用 AI API"""
