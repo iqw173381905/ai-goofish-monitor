@@ -36,6 +36,9 @@ ROOT = Path(__file__).resolve().parent
 STATE_FILE = ROOT / "state" / "acc_1.json"
 CRED_FILE = ROOT / "state" / "acc_credentials.json"
 LOG_FILE = ROOT / "logs" / "refresh_login.log"
+# 持久化浏览器会话目录：首次登录后保存登录态，后续刷新直接复用，
+# 无需再次扫码/输密码（会话 cookie 由 Playwright 持久化到该目录）。
+PROFILE_DIR = ROOT / "state" / "browser_profile"
 
 GOOFISH_HOME = "https://www.goofish.com/"
 WAIT_VERIFY_SECONDS = 6 * 60  # 扫码/验证环节最长等待
@@ -166,8 +169,10 @@ def main() -> None:
     password = cred.get("password", "")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        ctx = browser.new_context(
+        # 持久化上下文：保存登录会话，后续刷新无需重新登录
+        ctx = p.chromium.launch_persistent_context(
+            str(PROFILE_DIR),
+            headless=False,
             viewport={"width": 1280, "height": 800},
             locale="zh-CN",
             user_agent=(
@@ -183,7 +188,7 @@ def main() -> None:
             page.goto(GOOFISH_HOME, timeout=45000, wait_until="domcontentloaded")
         except Exception as exc:
             log(f"打开闲鱼首页失败: {exc}")
-            browser.close()
+            ctx.close()
             sys.exit(1)
         page.wait_for_timeout(4000)
 
@@ -245,7 +250,7 @@ def main() -> None:
 
             if not logged_in:
                 log("等待超时，未能确认登录成功。请重试或手动完成登录。")
-                browser.close()
+                ctx.close()
                 sys.exit(1)
 
         # ---------- 3. 跳转闲鱼首页，等待新 token 下发 ----------
@@ -254,7 +259,7 @@ def main() -> None:
             page.goto(GOOFISH_HOME, timeout=45000, wait_until="domcontentloaded")
         except Exception as exc:
             log(f"打开闲鱼首页失败: {exc}")
-            browser.close()
+            ctx.close()
             sys.exit(1)
         page.wait_for_timeout(6000)
         try:
@@ -268,7 +273,7 @@ def main() -> None:
         gf_cookies = [c for c in cookies if "goofish.com" in (c.get("domain") or "")]
         if not gf_cookies:
             log("未获取到闲鱼域 cookies，可能未建立闲鱼会话。")
-            browser.close()
+            ctx.close()
             sys.exit(1)
 
         if STATE_FILE.exists():
@@ -310,7 +315,7 @@ def main() -> None:
         else:
             log("闲鱼会话标记完整（unb/tracknick/sgcookie 均在）。")
 
-        browser.close()
+        ctx.close()
         log("完成。可以在任务管理中重新启动任务验证。")
         sys.exit(0)
 

@@ -6,6 +6,7 @@ import json
 import signal
 import contextlib
 import re
+import subprocess
 
 from src.config import STATE_FILE
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
@@ -14,6 +15,37 @@ from src.scraper import (
     resolve_effective_state_path,
     scrape_xianyu,
 )
+
+
+def _auto_refresh_login() -> tuple[bool, str]:
+    """自动运行 refresh_login.py 刷新闲鱼登录态。
+
+    token（_m_h5_tk）有效期极短（实测约 1.5 小时），任务启动前若检测到
+    临期/过期，自动调用刷新脚本（持久化会话 + 自动填密码，通常十几秒完成；
+    遇验证码时浏览器窗口会弹出等待用户处理，最长 7 分钟）。
+    返回 (是否刷新成功, 提示信息)。
+    """
+    print("\n[自动续期] 检测到登录态临期/过期，正在自动刷新闲鱼 cookie（可能弹出浏览器窗口）...")
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "refresh_login.py")
+    try:
+        proc = subprocess.run(
+            [sys.executable, script],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            timeout=420,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if proc.returncode == 0:
+            print("[自动续期] 刷新成功。")
+            return True, ""
+        tail = (proc.stdout or "")[-400:] + "\n" + (proc.stderr or "")[-400:]
+        return False, f"刷新脚本退出码 {proc.returncode}: {tail.strip()}"
+    except subprocess.TimeoutExpired:
+        return False, "自动刷新超时（可能正在等待扫码/验证码，可稍后手动到『账号管理』更新）"
+    except Exception as exc:
+        return False, f"自动刷新异常: {exc}"
 
 
 async def main():
@@ -181,10 +213,23 @@ async def main():
         print("没有需要执行的任务，程序退出。")
         return
 
-    # --- 启动前登录状态检查：签名 token 过期则提示去账号管理更新，跳过该任务 ---
+    # --- 启动前登录状态检查：签名 token 过期则自动刷新，仍失败则提示去账号管理 ---
+    auto_refresh_done = False
     for task_conf in active_task_configs:
         state_path = resolve_effective_state_path(task_conf)
         ok, reason = check_state_file_login_valid(state_path)
+        if not ok and not auto_refresh_done:
+            # 所有任务共用同一登录态文件，仅对第一个临期任务触发一次自动刷新
+            auto_refresh_done = True
+            refreshed, refresh_msg = _auto_refresh_login()
+            if refreshed:
+                ok, reason = check_state_file_login_valid(state_path)
+            else:
+                print(
+                    "\n==================== 登录失效检测 ====================\n"
+                    f"自动刷新登录态失败：{refresh_msg}\n"
+                    "====================================================\n"
+                )
         task_conf["_login_expired"] = not ok
         if not ok:
             print(
