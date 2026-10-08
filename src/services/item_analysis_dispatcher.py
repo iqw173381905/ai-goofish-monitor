@@ -131,11 +131,16 @@ class ItemAnalysisDispatcher:
 
     async def _run_ai_analysis(self, job: ItemAnalysisJob, record: dict) -> dict:
         image_paths: list[str] = []
+        image_urls: list[str] = []
         try:
-            image_urls = self._get_image_urls(record)
-            # 优先图片 URL 直传（中转处理快）；URL 为空时才下载本地图作 base64 回退
-            if not image_urls and job.analyze_images:
-                image_paths = await self._download_images(job, record)
+            # 仅当"分析商品图片"开关开启时才提取图片 URL / 下载图片；
+            # 关闭时 AI 走纯文本分析，不再把图片传给中转（修复：URL 直传改造后
+            # 曾无条件提取 URL，导致关闭开关仍分析图片）。
+            if job.analyze_images:
+                image_urls = self._get_image_urls(record)
+                # 优先图片 URL 直传（中转处理快）；URL 为空时才下载本地图作 base64 回退
+                if not image_urls:
+                    image_paths = await self._download_images(job, record)
             if not job.prompt_text:
                 return self._build_ai_error_result("任务未配置AI prompt，跳过分析。")
             ai_result = await self._ai_analyzer(record, image_paths, job.prompt_text, image_urls=image_urls)
