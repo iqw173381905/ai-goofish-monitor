@@ -75,7 +75,15 @@ else:
             os.environ['HTTPS_PROXY'] = PROXY_URL
 
         # openai 客户端内部的 httpx 会自动从环境变量中获取代理配置
-        client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
+        # 传输层超时兜底：中转站无响应/排队挂起时 120 秒强制失败（SDK 默认 600s，
+        # 曾导致每个商品 AI 分析卡满 10 分钟，整轮任务看起来"卡死"）；同时关闭
+        # SDK 自带重试，避免超时时间与重试叠加。
+        client = AsyncOpenAI(
+            api_key=API_KEY,
+            base_url=BASE_URL,
+            timeout=120.0,
+            max_retries=0,
+        )
     except Exception as e:
         print(f"初始化 OpenAI 客户端时出错: {e}")
         client = None
