@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import re
@@ -68,6 +69,55 @@ MAX_IMAGES_PER_PRODUCT = max(
     1,
     _positive_int(os.getenv("IMAGE_DOWNLOAD_LIMIT", "4"), 4),
 )
+
+# --- AI 分析图片压缩（Pillow） ---
+# 中转站对"长提示词 + 大图"处理极慢甚至超时（实测 3346 字符提示词 + 4 图 -> 120s 超时），
+# 下载后统一压到小尺寸 JPEG，显著减小请求体，避免每个商品 AI 分析超时拖垮整轮任务。
+try:
+    from PIL import Image as PILImage
+    _HAS_PIL = True
+except Exception:  # pragma: no cover
+    PILImage = None
+    _HAS_PIL = False
+
+# 压缩目标：长边像素（环境变量 AI_IMAGE_MAX_EDGE 可覆盖，默认 512）
+AI_IMAGE_MAX_EDGE = _positive_int(os.getenv("AI_IMAGE_MAX_EDGE", "512"), 512)
+# JPEG 压缩质量（环境变量 AI_IMAGE_QUALITY 可覆盖，默认 80）
+AI_IMAGE_QUALITY = max(1, min(95, _positive_int(os.getenv("AI_IMAGE_QUALITY", "80"), 80)))
+
+
+def _compress_image(path: str) -> bool:
+    """将图片压缩为长边 <= AI_IMAGE_MAX_EDGE 的 JPEG，覆盖原文件。失败静默跳过。"""
+    if not _HAS_PIL or not path or not os.path.exists(path):
+        return False
+    try:
+        with PILImage.open(path) as img:
+            img.load()
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
+            width, height = img.size
+            longest = max(width, height)
+            if longest <= AI_IMAGE_MAX_EDGE:
+                if path.lower().endswith(".jpg") or path.lower().endswith(".jpeg"):
+                    return False
+            else:
+                scale = AI_IMAGE_MAX_EDGE / longest
+                new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+                img = img.resize(new_size, PILImage.LANCZOS)
+            tmp_path = path + ".tmp.jpg"
+            img.save(tmp_path, "JPEG", quality=AI_IMAGE_QUALITY, optimize=True)
+            os.replace(tmp_path, path)
+            safe_print(
+                f"   [图片] 已压缩: {os.path.basename(path)} -> "
+                f"{img.width}x{img.height} (质量{AI_IMAGE_QUALITY})"
+            )
+            return True
+    except Exception as exc:
+        safe_print(f"   [图片] 压缩图片失败(不影响使用): {exc}")
+        with contextlib.suppress(Exception):
+            if os.path.exists(path + ".tmp.jpg"):
+                os.remove(path + ".tmp.jpg")
+        return False
 
 
 def safe_print(text):
@@ -181,10 +231,12 @@ async def download_all_images(product_id, image_urls, task_name="default", concu
             safe_print(
                 f"   [图片] 图片 {index}/{total_images} 已存在，跳过下载: {os.path.basename(save_path)}"
             )
+            _compress_image(save_path)
             return save_path
         async with semaphore:
             safe_print(f"   [图片] 正在下载图片 {index}/{total_images}: {url}")
             if await _download_single_image(url, save_path):
+                _compress_image(save_path)
                 safe_print(
                     f"   [图片] 图片 {index}/{total_images} 已成功下载到: {os.path.basename(save_path)}"
                 )
