@@ -11,6 +11,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import DateRangePicker from '@/components/results/DateRangePicker.vue'
 
 interface FileOption {
   value: string
@@ -143,18 +144,11 @@ const emit = defineEmits<{
       <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <div class="flex items-center gap-2 text-sm">
           <Label class="text-xs font-semibold text-slate-500 whitespace-nowrap">{{ t('results.filters.crawlDateRange') }}</Label>
-          <input
-            type="date"
-            class="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            :value="props.dateFrom || undefined"
-            @input="emit('update:dateFrom', ($event.target as HTMLInputElement).value)"
-          />
-          <span class="text-slate-400">—</span>
-          <input
-            type="date"
-            class="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            :value="props.dateTo || undefined"
-            @input="emit('update:dateTo', ($event.target as HTMLInputElement).value)"
+          <DateRangePicker
+            :date-from="props.dateFrom"
+            :date-to="props.dateTo"
+            @update:date-from="(value) => emit('update:dateFrom', value)"
+            @update:date-to="(value) => emit('update:dateTo', value)"
           />
         </div>
 
