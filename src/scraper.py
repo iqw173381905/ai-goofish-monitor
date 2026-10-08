@@ -1027,7 +1027,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     except Exception as e:
                         print(f"LOG: 应用区域筛选 '{region_filter}' 失败: {e}")
 
-                if min_price or max_price:
+                # --- 修改: 闲鱼网页版改版后，价格输入框的 Tab 提交不再触发列表接口，
+                # 此处 UI 价格筛选流程已停用（保留代码便于回溯），价格改为解析后按字段过滤。
+                if False and (min_price or max_price):
                     price_container = page.locator(
                         'div[class*="search-price-input-container"]'
                     ).first
@@ -1087,6 +1089,30 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     basic_items = await _parse_search_results_json(
                         await current_response.json(), f"第 {page_num} 页"
                     )
+                    # --- 修改: 价格改为解析后过滤（UI 价格输入流程已停用）---
+                    if basic_items and (min_price or max_price):
+                        _before_price = len(basic_items)
+                        _kept_price = []
+                        for _it in basic_items:
+                            _price_str = str(_it.get("当前售价", "0"))
+                            _price_num = None
+                            try:
+                                _price_num = float(
+                                    _price_str.replace("¥", "").replace(",", "").strip()
+                                )
+                            except (ValueError, AttributeError):
+                                _price_num = None
+                            if _price_num is not None:
+                                if min_price and _price_num < float(min_price):
+                                    continue
+                                if max_price and _price_num > float(max_price):
+                                    continue
+                            _kept_price.append(_it)
+                        basic_items = _kept_price
+                        log_time(
+                            f"价格过滤：{_before_price} -> {len(basic_items)} 条"
+                            f"（min={min_price}, max={max_price}）"
+                        )
                     if basic_items:
                         # "最新发布"后过滤：闲鱼页面"最新"选项实际是不限时间按最新排序，
                         # 为真正得到"刚刚发布"的商品，按发布时间只保留 NEW_PUBLISH_MINUTES 分钟内的
@@ -1327,6 +1353,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         await random_sleep(10, 15)
 
             except PlaywrightTimeoutError as e:
+                print(f"LOG: [调试] 主循环 PlaywrightTimeoutError，当前URL={page.url[:120]}")
                 if _is_login_url(page.url):
                     raise LoginRequiredError(
                         f"Login required: redirected to {page.url} (cookies/state likely expired)"
