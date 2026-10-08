@@ -464,6 +464,11 @@ def _build_extra_headers(raw_headers: Optional[dict]) -> dict:
     return headers
 
 
+# 卖家档案采集上限：商品列表最多抓 N 件、评价列表最多抓 N 条（够用即可，避免过多滚动拖慢 AI 分析）
+SELLER_ITEMS_CAP = 20
+SELLER_RATINGS_CAP = 20
+
+
 async def scrape_user_profile(context, user_id: str) -> dict:
     """
     【新版】访问指定用户的个人主页，按顺序采集其摘要信息、完整的商品列表和完整的评价列表。
@@ -491,24 +496,24 @@ async def scrape_user_profile(context, user_id: str) -> dict:
                 if not head_api_future.done():
                     head_api_future.set_exception(e)
 
-        # 捕获商品列表API
+        # 捕获商品列表API（最多抓 SELLER_ITEMS_CAP 件，够了就不再滚动）
         elif "mtop.idle.web.xyh.item.list" in response.url:
             try:
                 data = await response.json()
                 all_items.extend(data.get("data", {}).get("cardList", []))
                 print(f"      [API捕获] 商品列表... 当前已捕获 {len(all_items)} 件")
-                if not data.get("data", {}).get("nextPage", True):
+                if len(all_items) >= SELLER_ITEMS_CAP or not data.get("data", {}).get("nextPage", True):
                     stop_item_scrolling.set()
             except Exception as e:
                 stop_item_scrolling.set()
 
-        # 捕获评价列表API
+        # 捕获评价列表API（最多抓 SELLER_RATINGS_CAP 条，够了就不再滚动）
         elif "mtop.idle.web.trade.rate.list" in response.url:
             try:
                 data = await response.json()
                 all_ratings.extend(data.get("data", {}).get("cardList", []))
                 print(f"      [API捕获] 评价列表... 当前已捕获 {len(all_ratings)} 条")
-                if not data.get("data", {}).get("nextPage", True):
+                if len(all_ratings) >= SELLER_RATINGS_CAP or not data.get("data", {}).get("nextPage", True):
                     stop_rating_scrolling.set()
             except Exception as e:
                 stop_rating_scrolling.set()
@@ -525,19 +530,19 @@ async def scrape_user_profile(context, user_id: str) -> dict:
         head_data = await asyncio.wait_for(head_api_future, timeout=15)
         profile_data = await parse_user_head_data(head_data)
 
-        # --- 任务2: 滚动加载所有商品 (默认页面) ---
+        # --- 任务2: 滚动加载商品（默认页面，抓满 SELLER_ITEMS_CAP 件即停）---
         print("      [采集阶段] 开始采集该用户的商品列表...")
         await random_sleep(2, 4)  # 等待第一页商品API完成
         while not stop_item_scrolling.is_set():
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             try:
-                await asyncio.wait_for(stop_item_scrolling.wait(), timeout=8)
+                await asyncio.wait_for(stop_item_scrolling.wait(), timeout=4)
             except asyncio.TimeoutError:
                 print("      [滚动超时] 商品列表可能已加载完毕。")
                 break
         profile_data["卖家发布的商品列表"] = await _parse_user_items_data(all_items)
 
-        # --- 任务3: 点击并采集所有评价 ---
+        # --- 任务3: 点击并采集评价（抓满 SELLER_RATINGS_CAP 条即停）---
         print("      [采集阶段] 开始采集该用户的评价列表...")
         rating_tab_locator = page.locator("//div[text()='信用及评价']/ancestor::li")
         if await rating_tab_locator.count() > 0:
@@ -547,7 +552,7 @@ async def scrape_user_profile(context, user_id: str) -> dict:
             while not stop_rating_scrolling.is_set():
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 try:
-                    await asyncio.wait_for(stop_rating_scrolling.wait(), timeout=8)
+                    await asyncio.wait_for(stop_rating_scrolling.wait(), timeout=4)
                 except asyncio.TimeoutError:
                     print("      [滚动超时] 评价列表可能已加载完毕。")
                     break
@@ -583,6 +588,13 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     decision_mode = str(task_config.get("decision_mode", "ai")).strip().lower()
     if decision_mode not in {"ai", "keyword"}:
         decision_mode = "ai"
+    # 防御：AI 判断模式下若分析标准为空（标准尚未生成/生成失败），提示并跳过该任务
+    if decision_mode == "ai" and not (ai_prompt_text or "").strip():
+        print(
+            f"   [跳过] 任务「{task_config.get('task_name', '')}」为 AI 判断模式但分析标准为空。"
+            f"请在任务设置里重新生成 AI 分析标准，或切换到关键词判断模式后再启动。"
+        )
+        return
     keyword_rules = task_config.get("keyword_rules") or []
     required_keywords = task_config.get("required_keywords") or []
     optional_keywords = task_config.get("optional_keywords") or []

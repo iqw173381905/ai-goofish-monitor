@@ -8,6 +8,7 @@ import os
 import threading
 import asyncio
 import aiofiles
+import time
 from datetime import datetime
 from src.api.dependencies import (
     get_process_service,
@@ -46,6 +47,27 @@ def _has_keyword_rules(rules) -> bool:
     return bool(rules and len(rules) > 0)
 
 
+def _set_generating_flag(task_id: int, value: bool) -> None:
+    """置位/清位 criteria_generating，带重试兜底（Windows 上偶发 sqlite 写锁）。
+    置位时记录 criteria_generating_since（生成开始时间），用于识别 worker 卡死
+    产生的 stale 标记（AI 中转无响应时，start_task 据此放行启动）。"""
+    since_value = datetime.now().isoformat(timespec="seconds") if value else None
+    for attempt in range(3):
+        try:
+            with sqlite_connection() as conn:
+                conn.execute(
+                    "UPDATE tasks SET criteria_generating = ?, criteria_generating_since = ? WHERE id = ?",
+                    (1 if value else 0, since_value, task_id),
+                )
+                conn.commit()
+            return
+        except Exception as e:
+            if attempt == 2:
+                print(f"[后台] 更新 criteria 状态失败 task={task_id}: {e}")
+                return
+            time.sleep(0.5)
+
+
 def _regenerate_criteria_in_background(task_id: int, keyword: str, description: str) -> None:
     """后台重新生成 AI 分析标准：写 prompts 文件并更新 DB 的 ai_prompt_criteria_file。
 
@@ -61,24 +83,7 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
     output_filename = f"prompts/{safe_keyword}_criteria.txt"
 
     def _set_generating(value: bool) -> None:
-        """置位/清位 criteria_generating，带重试兜底（Windows 上偶发 sqlite 写锁）。
-        置位时记录 criteria_generating_since（生成开始时间），用于识别 worker 卡死
-        产生的 stale 标记（AI 中转无响应时，start_task 据此放行启动）。"""
-        since_value = datetime.now().isoformat(timespec="seconds") if value else None
-        for attempt in range(3):
-            try:
-                with sqlite_connection() as conn:
-                    conn.execute(
-                        "UPDATE tasks SET criteria_generating = ?, criteria_generating_since = ? WHERE id = ?",
-                        (1 if value else 0, since_value, task_id),
-                    )
-                    conn.commit()
-                return
-            except Exception as e:
-                if attempt == 2:
-                    print(f"[后台] 更新 criteria 状态失败 task={task_id}: {e}")
-                    return
-                time.sleep(0.5)
+        _set_generating_flag(task_id, value)
 
     def worker():
         _set_generating(True)
@@ -197,10 +202,18 @@ async def generate_task(
     try:
         mode = req.decision_mode or "ai"
         if mode == "ai":
+            # 先创建占位任务（分析标准为空、生成中标记=1），页面立即可见"生成中"，
+            # 后台 job 再异步生成分析标准并回填；不再等生成完才让任务出现在列表。
+            task = await service.create_task(build_task_create(req, ""))
+            _set_generating_flag(task.id, True)
+            # 置位后重新读取任务，确保返回给前端的 generating 状态为 true（页面立即显示"生成中"）
+            refreshed = await service.get_task(task.id)
+            task_for_response = refreshed if refreshed is not None else task
             job = await generation_service.create_job(req.task_name)
             generation_service.track(
                 run_ai_generation_job(
                     job_id=job.job_id,
+                    task_id=task.id,
                     req=req,
                     task_service=service,
                     scheduler_service=scheduler_service,
@@ -208,9 +221,10 @@ async def generate_task(
                 )
             )
             return JSONResponse(
-                status_code=202,
+                status_code=200,
                 content={
-                    "message": "AI 任务生成已开始。",
+                    "message": "任务已创建，AI 分析标准正在后台生成。",
+                    "task": serialize_task(task_for_response, scheduler_service),
                     "job": job.model_dump(mode="json"),
                 },
             )

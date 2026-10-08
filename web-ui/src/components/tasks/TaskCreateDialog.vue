@@ -51,16 +51,19 @@ async function handleCreateTask(data: TaskGenerateRequest) {
   clearJob()
   try {
     const result = await createTaskWithAI(data)
-    if (result.job) {
+    // 后端现在先创建任务（含"生成中"标记）再后台生成分析标准。
+    // 任务立即可见：关闭表单并通知列表刷新，无需等生成完成。
+    if (result.task) {
       isFormOpen.value = false
+      emit('created')
+    }
+    if (result.job) {
       isProgressOpen.value = true
       beginPolling(result.job)
       isSubmitting.value = false
       return
     }
-    emit('created')
     toast({ title: t('tasks.toasts.created') })
-    isFormOpen.value = false
   } catch (error) {
     toast({
       title: t('tasks.toasts.createFailed'),
