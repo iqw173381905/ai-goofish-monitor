@@ -469,7 +469,7 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     根据单个任务配置，异步爬取闲鱼商品数据，并对每个新发现的商品进行实时的、独立的AI分析和通知。
     """
     keyword = task_config["keyword"]
-    max_pages = task_config.get("max_pages", 1)
+    max_pages = task_config.get("max_pages", 1) or 1
     personal_only = task_config.get("personal_only", False)
     min_price = task_config.get("min_price")
     max_price = task_config.get("max_price")
@@ -488,6 +488,10 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     if new_publish_option == "__none__":
         new_publish_option = ""
     region_filter = (task_config.get("region") or "").strip()
+    # "最新"选项（不限时间、按发布时间排序）时，第 1 页往往以老商品为主，
+    # 强制至少多抓几页，再按发布时间过滤，提高新商品命中率。
+    if new_publish_option == "最新":
+        max_pages = max(int(max_pages), 3)
 
     processed_links = set()
     history_run_id = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -984,10 +988,20 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                                 f"最新发布过滤：{before_count} -> {len(basic_items)} "
                                 f"（仅保留最近 {NEW_PUBLISH_MINUTES} 分钟内发布）"
                             )
+                            if before_count > 0 and not kept:
+                                log_time(
+                                    f"提示：本页暂无 {NEW_PUBLISH_MINUTES} 分钟内的新品，"
+                                    f"继续翻页查找；若长期为 0，建议在任务设置中改用"
+                                    f"“1天内/3天内”发布范围，命中率更高。"
+                                )
                         # 移除内部字段，避免进入详情/AI 分析/存储下游
                         for it in basic_items:
                             it.pop("_publish_ts", None)
                     if not basic_items:
+                        # "最新"模式下首页过滤可能为空（老商品居多），
+                        # 不中断，继续翻页寻找新品；其他模式首页无结果则停止。
+                        if new_publish_option == "最新":
+                            continue
                         break
                     historical_snapshots.extend(
                         record_market_snapshots(

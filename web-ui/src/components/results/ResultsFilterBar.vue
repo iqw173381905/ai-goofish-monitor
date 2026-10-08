@@ -49,7 +49,7 @@ const selectedLabel = computed(() => {
   if (options.value.length === 0) return t('results.filters.noResults')
   if (!props.selectedFile) return t('results.filters.chooseResult')
   const match = options.value.find((option) => option.value === props.selectedFile)
-  return match ? match.label : t('results.filters.taskNameLabel', { task: t('common.unnamed') })
+  return match ? match.label : props.selectedFile || t('results.filters.taskNameLabel', { task: t('common.unnamed') })
 })
 
 const labelClass = computed(() => {

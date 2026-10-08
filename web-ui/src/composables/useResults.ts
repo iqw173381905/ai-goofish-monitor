@@ -277,11 +277,14 @@ export function useResults() {
     files.value.map((file) => {
       const keyword = getKeywordFromFilename(file)
       const taskName = taskNameByKeyword.value[keyword]
+      // 无任务映射（如任务改词后遗留的旧关键词结果文件）时，
+      // 直接显示关键词本身，方便用户辨识，而不是笼统的"未命名"。
+      const displayName = taskName || keyword || t('common.unnamed')
       return {
         value: file,
-        taskName: taskName || t('common.unnamed'),
+        taskName: displayName,
         label: t('results.filters.taskNameLabel', {
-          task: taskName || t('common.unnamed'),
+          task: displayName,
         }),
       }
     })
