@@ -120,6 +120,8 @@ async def _check_login_expired(page) -> None:
 
 def resolve_effective_state_path(task_config: dict) -> str:
     """解析任务实际使用的登录态文件路径（与 scraper 账号选择逻辑一致）。"""
+    from src.rotation import _is_credential_or_backup_file
+
     account_file = str(task_config.get("account_state_file") or "").strip()
     if account_file:
         return account_file
@@ -128,7 +130,8 @@ def resolve_effective_state_path(task_config: dict) -> str:
     state_dir = os.getenv("ACCOUNT_STATE_DIR", "state").strip().strip('"').strip("'")
     if os.path.isdir(state_dir):
         names = sorted(
-            n for n in os.listdir(state_dir) if n.lower().endswith(".json")
+            n for n in os.listdir(state_dir)
+            if n.lower().endswith(".json") and not _is_credential_or_backup_file(n)
         )
         if names:
             return os.path.join(state_dir, names[0])

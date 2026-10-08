@@ -51,6 +51,19 @@ def parse_proxy_pool(value: Optional[str]) -> List[str]:
     return [entry.strip() for entry in str(value).split(",") if entry.strip()]
 
 
+def _is_credential_or_backup_file(name: str) -> bool:
+    """排除账号密码凭据文件（acc_credentials.json）与备份文件（*.bak 等）。
+
+    这些文件混在 state 目录里会被 auto 账号策略误当成登录态 cookie 文件，
+    导致任务用空 cookie 启动、被闲鱼重定向到登录页（显示"登录失效"）。"""
+    lowered = name.lower()
+    if "credential" in lowered or "cred_" in lowered or lowered.endswith("_cred.json"):
+        return True
+    if lowered.endswith(".bak") or lowered.endswith(".tmp") or lowered.endswith("~"):
+        return True
+    return False
+
+
 def load_state_files(state_dir: str) -> List[str]:
     if not state_dir:
         return []
@@ -58,6 +71,6 @@ def load_state_files(state_dir: str) -> List[str]:
         return []
     files = []
     for name in os.listdir(state_dir):
-        if name.endswith(".json"):
+        if name.endswith(".json") and not _is_credential_or_backup_file(name):
             files.append(os.path.join(state_dir, name))
     return sorted(files)
