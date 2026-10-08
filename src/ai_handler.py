@@ -62,6 +62,13 @@ DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY = max(
     _positive_int(os.getenv("IMAGE_DOWNLOAD_CONCURRENCY", "3"), 3),
 )
 
+# 单个商品最多下载的图片数量（供 AI 识别分析），前几张已覆盖主要外观，
+# 下载太多既慢又占用 token/流量，可用环境变量 IMAGE_DOWNLOAD_LIMIT 覆盖
+MAX_IMAGES_PER_PRODUCT = max(
+    1,
+    _positive_int(os.getenv("IMAGE_DOWNLOAD_LIMIT", "4"), 4),
+)
+
 
 def safe_print(text):
     """安全的打印函数，处理编码错误"""
@@ -156,6 +163,13 @@ async def download_all_images(product_id, image_urls, task_name="default", concu
     urls = [url.strip() for url in image_urls if url.strip().startswith('http')]
     if not urls:
         return []
+
+    # 限制单个商品最多下载的图片数量，加快分析速度
+    if len(urls) > MAX_IMAGES_PER_PRODUCT:
+        safe_print(
+            f"   [图片] 商品共 {len(urls)} 张图，按上限仅下载前 {MAX_IMAGES_PER_PRODUCT} 张"
+        )
+        urls = urls[:MAX_IMAGES_PER_PRODUCT]
 
     max_concurrency = _positive_int(concurrency, DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY)
     semaphore = asyncio.Semaphore(max_concurrency)
