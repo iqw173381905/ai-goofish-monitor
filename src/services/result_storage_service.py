@@ -55,12 +55,20 @@ def _build_query_conditions(
     filename: str,
     ai_recommended_only: bool,
     keyword_recommended_only: bool,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> tuple[str, list]:
     conditions = []
     params: list = []
     if filename != ALL_FILES_MARKER:
         conditions.append("result_filename = ?")
         params.append(filename)
+    if date_from:
+        conditions.append("date(crawl_time) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        conditions.append("date(crawl_time) <= date(?)")
+        params.append(date_to)
     if ai_recommended_only and keyword_recommended_only:
         # 合并语义：AI 推荐 + 关键词推荐同时开启 = "只看推荐"（is_recommended 即可，不限来源）
         conditions.append("is_recommended = 1")
@@ -132,11 +140,15 @@ def _load_filtered_records_from_conn(
     sort_by: str,
     sort_order: str,
     include_hidden: bool,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> list[dict]:
     where_clause, params = _build_query_conditions(
         filename=filename,
         ai_recommended_only=ai_recommended_only,
         keyword_recommended_only=keyword_recommended_only,
+        date_from=date_from,
+        date_to=date_to,
     )
     order_clause = _sort_expression(sort_by, sort_order)
     rows = conn.execute(
@@ -280,6 +292,8 @@ async def query_result_records(
     page: int,
     limit: int,
     include_hidden: bool = False,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> tuple[int, list[dict]]:
     return await asyncio.to_thread(
         _query_result_records_sync,
@@ -291,6 +305,8 @@ async def query_result_records(
         page,
         limit,
         include_hidden,
+        date_from,
+        date_to,
     )
 
 
@@ -303,6 +319,8 @@ def _query_result_records_sync(
     page: int,
     limit: int,
     include_hidden: bool,
+    date_from: str | None,
+    date_to: str | None,
 ) -> tuple[int, list[dict]]:
     bootstrap_sqlite_storage()
     offset = max(page - 1, 0) * limit
@@ -315,6 +333,8 @@ def _query_result_records_sync(
             sort_by=sort_by,
             sort_order=sort_order,
             include_hidden=include_hidden,
+            date_from=date_from,
+            date_to=date_to,
         )
     total = len(records)
     return total, records[offset: offset + limit]
@@ -328,6 +348,8 @@ async def load_all_result_records(
     sort_by: str,
     sort_order: str,
     include_hidden: bool = False,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> list[dict]:
     return await asyncio.to_thread(
         _load_all_result_records_sync,
@@ -337,6 +359,8 @@ async def load_all_result_records(
         sort_by,
         sort_order,
         include_hidden,
+        date_from,
+        date_to,
     )
 
 
@@ -347,6 +371,8 @@ def _load_all_result_records_sync(
     sort_by: str,
     sort_order: str,
     include_hidden: bool,
+    date_from: str | None,
+    date_to: str | None,
 ) -> list[dict]:
     bootstrap_sqlite_storage()
     with sqlite_connection() as conn:
@@ -358,6 +384,8 @@ def _load_all_result_records_sync(
             sort_by=sort_by,
             sort_order=sort_order,
             include_hidden=include_hidden,
+            date_from=date_from,
+            date_to=date_to,
         )
 
 

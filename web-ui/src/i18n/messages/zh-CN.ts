@@ -145,6 +145,7 @@ const zhCN = {
       sortByPublishTime: '按发布时间',
       sortByPrice: '按价格',
       sortByKeywordHits: '按命中数',
+      crawlDateRange: '爬取日期',
       desc: '降序',
       asc: '升序',
       showAll: '全部',

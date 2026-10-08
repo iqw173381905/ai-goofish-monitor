@@ -159,6 +159,8 @@ async function handleSaveBlacklistRules() {
       v-model:includeHidden="filters.include_hidden"
       v-model:sortBy="filters.sort_by"
       v-model:sortOrder="filters.sort_order"
+      v-model:dateFrom="filters.date_from"
+      v-model:dateTo="filters.date_to"
       :is-loading="isLoading"
       @refresh="refreshResults"
       @manage-blacklist="openBlacklistDialog"

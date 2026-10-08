@@ -91,6 +91,8 @@ async def get_result_file_content(
     include_hidden: bool = Query(False),
     sort_by: str = Query("crawl_time"),
     sort_order: str = Query("desc"),
+    date_from: str | None = Query(None, description="按爬取日期筛选（含当天），格式 YYYY-MM-DD，不填不限制"),
+    date_to: str | None = Query(None, description="按爬取日期筛选（含当天），格式 YYYY-MM-DD，不填不限制"),
 ):
     """读取指定的 .jsonl 文件内容，支持分页、筛选和排序"""
     # AI 推荐与关键词推荐可同时开启，合并为"只看推荐"（不限来源）
@@ -109,6 +111,8 @@ async def get_result_file_content(
             page=page,
             limit=limit,
             include_hidden=include_hidden,
+            date_from=date_from or None,
+            date_to=date_to or None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -149,6 +153,8 @@ async def export_result_file_content(
     include_hidden: bool = Query(False),
     sort_by: str = Query("crawl_time"),
     sort_order: str = Query("desc"),
+    date_from: str | None = Query(None, description="按爬取日期筛选（含当天），格式 YYYY-MM-DD，不填不限制"),
+    date_to: str | None = Query(None, description="按爬取日期筛选（含当天），格式 YYYY-MM-DD，不填不限制"),
 ):
     # AI 推荐与关键词推荐可同时开启，合并为"只看推荐"（不限来源）
     if recommended_only and not ai_recommended_only and not keyword_recommended_only:
@@ -164,6 +170,8 @@ async def export_result_file_content(
             sort_by=sort_by,
             sort_order=sort_order,
             include_hidden=include_hidden,
+            date_from=date_from or None,
+            date_to=date_to or None,
         )
         csv_text = build_results_csv(
             enrich_records_with_price_insight(results, filename)

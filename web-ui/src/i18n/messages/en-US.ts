@@ -145,6 +145,7 @@ const enUS = {
       sortByPublishTime: 'Publish Time',
       sortByPrice: 'Price',
       sortByKeywordHits: 'Keyword Hits',
+      crawlDateRange: 'Crawl Date',
       desc: 'Descending',
       asc: 'Ascending',
       showAll: 'All',

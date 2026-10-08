@@ -8,6 +8,8 @@ export interface GetResultContentParams {
   include_hidden?: boolean;
   sort_by?: 'crawl_time' | 'publish_time' | 'price' | 'keyword_hit_count';
   sort_order?: 'asc' | 'desc';
+  date_from?: string;
+  date_to?: string;
   page?: number;
   limit?: number;
 }

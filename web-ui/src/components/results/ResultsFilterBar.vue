@@ -26,6 +26,8 @@ interface Props {
   includeHidden: boolean
   sortBy: 'crawl_time' | 'publish_time' | 'price' | 'keyword_hit_count'
   sortOrder: 'asc' | 'desc'
+  dateFrom: string
+  dateTo: string
   isLoading: boolean
   isReady: boolean
 }
@@ -71,6 +73,8 @@ const emit = defineEmits<{
   (e: 'update:includeHidden', value: boolean): void
   (e: 'update:sortBy', value: 'crawl_time' | 'publish_time' | 'price' | 'keyword_hit_count'): void
   (e: 'update:sortOrder', value: 'asc' | 'desc'): void
+  (e: 'update:dateFrom', value: string): void
+  (e: 'update:dateTo', value: string): void
   (e: 'refresh'): void
   (e: 'export'): void
   (e: 'delete'): void
@@ -137,6 +141,23 @@ const emit = defineEmits<{
 
     <div class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div class="flex items-center gap-2 text-sm">
+          <Label class="text-xs font-semibold text-slate-500 whitespace-nowrap">{{ t('results.filters.crawlDateRange') }}</Label>
+          <input
+            type="date"
+            class="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            :value="props.dateFrom || undefined"
+            @input="emit('update:dateFrom', ($event.target as HTMLInputElement).value)"
+          />
+          <span class="text-slate-400">—</span>
+          <input
+            type="date"
+            class="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            :value="props.dateTo || undefined"
+            @input="emit('update:dateTo', ($event.target as HTMLInputElement).value)"
+          />
+        </div>
+
         <div class="flex items-center gap-4">
           <label class="flex cursor-pointer items-center space-x-2 text-sm">
             <input

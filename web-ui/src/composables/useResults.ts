@@ -40,6 +40,8 @@ export function useResults() {
       include_hidden: false,
       sort_by: 'crawl_time',
       sort_order: 'desc',
+      date_from: '',
+      date_to: '',
     }
     try {
       const saved = localStorage.getItem(STORAGE_KEY_FILTERS)
