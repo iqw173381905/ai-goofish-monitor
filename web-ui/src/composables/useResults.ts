@@ -29,6 +29,9 @@ export function useResults() {
   
   const STORAGE_KEY_FILTERS = 'resultFilters'
 
+  // "全部任务"合并视图标记：与后端 ALL_FILES_MARKER 保持一致
+  const ALL_FILES = '__all__'
+
   function loadPersistedFilters(): Required<Omit<GetResultContentParams, 'page' | 'limit'>> {
     const defaults: Required<Omit<GetResultContentParams, 'page' | 'limit'>> = {
       recommended_only: false,
@@ -66,12 +69,12 @@ export function useResults() {
       files.value = fileList
       // If a file is selected that no longer exists, reset it.
       // Otherwise, if nothing is selected, select the first file by default.
-      if (selectedFile.value && fileList.includes(selectedFile.value)) {
+      if (selectedFile.value && (selectedFile.value === ALL_FILES || fileList.includes(selectedFile.value))) {
         return
       }
 
       const lastSelected = localStorage.getItem('lastSelectedResultFile')
-      if (lastSelected && fileList.includes(lastSelected)) {
+      if (lastSelected && (lastSelected === ALL_FILES || fileList.includes(lastSelected))) {
         selectedFile.value = lastSelected
         return
       }
@@ -112,7 +115,7 @@ export function useResults() {
   }
 
   async function fetchInsights() {
-    if (!selectedFile.value) {
+    if (!selectedFile.value || selectedFile.value === ALL_FILES) {
       insights.value = null
       return
     }
@@ -126,7 +129,7 @@ export function useResults() {
   }
 
   async function fetchBlacklistRules() {
-    if (!selectedFile.value) {
+    if (!selectedFile.value || selectedFile.value === ALL_FILES) {
       blacklistKeywords.value = []
       return
     }
@@ -273,8 +276,9 @@ export function useResults() {
     { immediate: true }
   )
 
-  const fileOptions = computed(() =>
-    files.value.map((file) => {
+  const fileOptions = computed(() => {
+    const allTasksLabel = t('results.filters.allTasks')
+    const taskOptions = files.value.map((file) => {
       const keyword = getKeywordFromFilename(file)
       const taskName = taskNameByKeyword.value[keyword]
       // 无任务映射（如任务改词后遗留的旧关键词结果文件）时，
@@ -288,7 +292,16 @@ export function useResults() {
         }),
       }
     })
-  )
+    // "全部任务"置顶：跨所有结果文件合并查看
+    return [
+      {
+        value: ALL_FILES,
+        taskName: allTasksLabel,
+        label: t('results.filters.taskNameLabel', { task: allTasksLabel }),
+      },
+      ...taskOptions,
+    ]
+  })
 
   // Lifecycle
   onMounted(() => {
@@ -296,9 +309,13 @@ export function useResults() {
     fetchTaskNameMap()
   })
 
+  // "全部任务"合并视图标记：洞察/黑名单等单文件维度功能在全部模式下不可用
+  const isAllMode = computed(() => selectedFile.value === ALL_FILES)
+
   return {
     files,
     selectedFile,
+    isAllMode,
     results,
     insights,
     totalItems,

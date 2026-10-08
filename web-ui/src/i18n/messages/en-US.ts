@@ -149,6 +149,7 @@ const enUS = {
       asc: 'Ascending',
       showAll: 'All',
       recommendedOnly: 'Recommended only',
+      allTasks: 'All tasks',
       aiOnly: 'AI recommendations only',
       keywordOnly: 'Keyword recommendations only',
       includeHidden: 'Show hidden items',

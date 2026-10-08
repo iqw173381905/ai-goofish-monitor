@@ -15,6 +15,7 @@ from src.services.result_file_service import (
     validate_result_filename,
 )
 from src.services.result_storage_service import (
+    ALL_FILES_MARKER,
     build_result_ndjson,
     delete_result_file_records,
     list_result_filenames,
@@ -113,7 +114,7 @@ async def get_result_file_content(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"读取结果文件时出错: {exc}")
-    if total_items <= 0 and not await result_file_exists(filename):
+    if total_items <= 0 and filename != ALL_FILES_MARKER and not await result_file_exists(filename):
         raise HTTPException(status_code=404, detail="结果文件未找到")
     paginated_results = enrich_records_with_price_insight(items, filename)
 
@@ -129,6 +130,9 @@ async def get_result_file_content(
 async def get_result_file_insights(filename: str):
     try:
         validate_result_filename(filename)
+        if filename == ALL_FILES_MARKER:
+            # "全部任务"为跨文件合并视图，不提供单任务市场洞察
+            return {"items": [], "statistics": None, "daily_prices": []}
         keyword = filename.replace("_full_data.jsonl", "")
         visible_item_ids = load_visible_result_item_ids(filename)
         return build_price_history_insights(keyword, visible_item_ids=visible_item_ids)
@@ -195,6 +199,8 @@ async def patch_item_status(filename: str, item_id: str, body: UpdateStatusReque
     """更新指定商品的状态（active/hidden/expired）"""
     try:
         validate_result_filename(filename)
+        if filename == ALL_FILES_MARKER:
+            raise HTTPException(status_code=400, detail="全部任务视图不支持单个商品屏蔽，请切换到具体任务后操作")
         updated = await update_item_status(filename, item_id, body.status.value)
         if not updated:
             raise HTTPException(status_code=404, detail="商品未找到")

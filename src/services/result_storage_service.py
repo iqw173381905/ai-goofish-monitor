@@ -25,6 +25,9 @@ SORT_COLUMN_MAP = {
     "keyword_hit_count": "keyword_hit_count",
 }
 
+# 特殊标记：结果查看页"全部任务"模式，跨所有结果文件合并查询
+ALL_FILES_MARKER = "__all__"
+
 
 def _get_link_unique_key(link: str) -> str:
     return link.split("&", 1)[0]
@@ -53,8 +56,11 @@ def _build_query_conditions(
     ai_recommended_only: bool,
     keyword_recommended_only: bool,
 ) -> tuple[str, list]:
-    conditions = ["result_filename = ?"]
-    params: list = [filename]
+    conditions = []
+    params: list = []
+    if filename != ALL_FILES_MARKER:
+        conditions.append("result_filename = ?")
+        params.append(filename)
     if ai_recommended_only and keyword_recommended_only:
         # 合并语义：AI 推荐 + 关键词推荐同时开启 = "只看推荐"（is_recommended 即可，不限来源）
         conditions.append("is_recommended = 1")
@@ -66,6 +72,9 @@ def _build_query_conditions(
         conditions.append("is_recommended = 1")
         conditions.append("analysis_source = ?")
         params.append("keyword")
+    if not conditions:
+        # "全部任务"跨文件合并且无其他筛选时，避免生成空 WHERE 子句
+        return "1 = 1", params
     return " AND ".join(conditions), params
 
 
@@ -139,7 +148,12 @@ def _load_filtered_records_from_conn(
         """,
         tuple(params),
     ).fetchall()
-    blacklist_keywords = _load_blacklist_keywords_from_conn(conn, filename)
+    # "全部任务"模式跨文件合并：黑名单规则不适用（黑名单是单文件维度）
+    blacklist_keywords = (
+        _load_blacklist_keywords_from_conn(conn, filename)
+        if filename != ALL_FILES_MARKER
+        else []
+    )
 
     records: list[dict] = []
     for row in rows:

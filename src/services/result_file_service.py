@@ -8,10 +8,15 @@ from src.services.price_history_service import (
     load_price_snapshots,
     parse_price_value,
 )
-from src.services.result_storage_service import load_visible_result_item_ids
+from src.services.result_storage_service import (
+    ALL_FILES_MARKER,
+    load_visible_result_item_ids,
+)
 
 
 def validate_result_filename(filename: str) -> None:
+    if filename == ALL_FILES_MARKER:
+        return
     if not filename.endswith(".jsonl") or "/" in filename or ".." in filename:
         raise ValueError("无效的文件名")
 

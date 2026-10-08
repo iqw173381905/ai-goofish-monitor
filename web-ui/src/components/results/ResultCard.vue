@@ -15,6 +15,7 @@ import { formatDateTime } from '@/i18n'
 
 interface Props {
   item: ResultItem
+  disableToggleBlock?: boolean
 }
 
 const props = defineProps<Props>()
@@ -42,7 +43,7 @@ const crawlTime = props.item.爬取时间
 const matchScore = ai?.value_score ?? 0
 const isHidden = computed(() => props.item._effective_hidden === true || props.item._status === 'hidden')
 const isRuleHidden = computed(() => props.item._hidden_reason === 'rule')
-const canToggleBlock = computed(() => props.item._hidden_reason !== 'rule' && props.item._hidden_reason !== 'expired')
+const canToggleBlock = computed(() => !props.disableToggleBlock && props.item._hidden_reason !== 'rule' && props.item._hidden_reason !== 'expired')
 const hiddenLabel = computed(() => {
   if (props.item._hidden_reason === 'rule') return t('results.card.blacklisted')
   if (props.item._hidden_reason === 'expired') return t('results.card.expired')

@@ -62,6 +62,9 @@ const labelClass = computed(() => {
 
 const isSelectDisabled = computed(() => !props.isReady || options.value.length === 0)
 
+// "全部任务"合并视图：黑名单与删除是单文件维度操作，全部模式下禁用
+const isAllMode = computed(() => props.selectedFile === '__all__')
+
 const emit = defineEmits<{
   (e: 'update:selectedFile', value: string): void
   (e: 'update:recommendedOnly', value: boolean): void
@@ -174,7 +177,7 @@ const emit = defineEmits<{
         <Button
           variant="outline"
           @click="emit('manage-blacklist')"
-          :disabled="props.isLoading || !props.selectedFile"
+          :disabled="props.isLoading || !props.selectedFile || isAllMode"
         >
           {{ t('results.filters.manageBlacklist') }}
         </Button>
@@ -190,7 +193,7 @@ const emit = defineEmits<{
         <Button
           variant="destructive"
           @click="emit('delete')"
-          :disabled="props.isLoading || !props.selectedFile"
+          :disabled="props.isLoading || !props.selectedFile || isAllMode"
         >
           {{ t('results.filters.deleteResult') }}
         </Button>

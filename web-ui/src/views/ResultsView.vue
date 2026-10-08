@@ -36,6 +36,7 @@ const {
   saveBlacklistRules,
   fileOptions,
   isFileOptionsReady,
+  isAllMode,
 } = useResults()
 
 const isDeleteDialogOpen = ref(false)
@@ -165,9 +166,18 @@ async function handleSaveBlacklistRules() {
       @delete="openDeleteDialog"
     />
 
-    <ResultsInsightsPanel :insights="insights" :selected-task-label="selectedTaskLabel" />
+    <ResultsInsightsPanel
+      v-if="!isAllMode"
+      :insights="insights"
+      :selected-task-label="selectedTaskLabel"
+    />
 
-    <ResultsGrid :results="results" :is-loading="isLoading" @toggle-block="toggleItemBlock" />
+    <ResultsGrid
+      :results="results"
+      :is-loading="isLoading"
+      :disable-toggle-block="isAllMode"
+      @toggle-block="toggleItemBlock"
+    />
 
     <Dialog v-model:open="isDeleteDialogOpen">
       <DialogContent class="sm:max-w-[420px]">

@@ -149,6 +149,7 @@ const zhCN = {
       asc: '升序',
       showAll: '全部',
       recommendedOnly: '仅查看推荐',
+      allTasks: '全部任务',
       aiOnly: '仅看AI推荐',
       keywordOnly: '仅看关键词推荐',
       includeHidden: '显示已屏蔽结果',
