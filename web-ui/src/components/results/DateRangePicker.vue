@@ -24,6 +24,12 @@ const viewMonth = ref<number>(new Date().getMonth()) // 0-11
 const tempStart = ref<string>('')
 const tempEnd = ref<string>('')
 
+// Teleport 到 body 后的 fixed 定位
+const triggerRef = ref<HTMLElement | null>(null)
+const popupTop = ref(0)
+const popupLeft = ref(0)
+const POPUP_WIDTH = 300
+
 const WEEK_START = 1 // 周一为每周第一天
 
 function fmtDate(year: number, month: number, day: number): string {
@@ -47,10 +53,22 @@ function initViewFromSelection() {
   }
 }
 
+function computePopupPosition() {
+  const el = triggerRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  popupTop.value = rect.bottom + 6
+  // 右侧空间不足时右对齐，避免溢出视口
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth
+  const left = rect.left
+  popupLeft.value = left + POPUP_WIDTH > viewportWidth - 8 ? Math.max(8, viewportWidth - POPUP_WIDTH - 8) : left
+}
+
 function openPanel() {
   tempStart.value = props.dateFrom || ''
   tempEnd.value = props.dateTo || ''
   initViewFromSelection()
+  computePopupPosition()
   open.value = true
 }
 
@@ -145,16 +163,35 @@ function pickDay(day: string) {
   tempEnd.value = ''
 }
 
-function onDocumentClick() {
+function onDocumentClick(event: MouseEvent) {
+  if (!open.value) return
+  const target = event.target as Node
+  // 点击面板内部或触发按钮不关闭
+  if (triggerRef.value && triggerRef.value.contains(target)) return
+  const panel = document.getElementById('date-range-picker-panel')
+  if (panel && panel.contains(target)) return
+  closePanel()
+}
+
+function onScrollOrResize() {
   if (open.value) closePanel()
 }
 
-onMounted(() => document.addEventListener('click', onDocumentClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+  window.addEventListener('scroll', onScrollOrResize, true)
+  window.addEventListener('resize', onScrollOrResize)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocumentClick)
+  window.removeEventListener('scroll', onScrollOrResize, true)
+  window.removeEventListener('resize', onScrollOrResize)
+})
 
 watch(open, (val) => {
   if (val) {
     initViewFromSelection()
+    computePopupPosition()
   }
 })
 
@@ -170,7 +207,7 @@ const displayText = computed(() => {
 </script>
 
 <template>
-  <div class="relative" @click.stop>
+  <div class="relative inline-block" ref="triggerRef">
     <button
       type="button"
       class="flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -183,10 +220,14 @@ const displayText = computed(() => {
       <span class="whitespace-nowrap">{{ displayText }}</span>
       <span v-if="dateFrom || dateTo" class="ml-1 cursor-pointer text-slate-400 hover:text-slate-600" title="清除日期筛选" @click.stop="clearRange">✕</span>
     </button>
+  </div>
 
+  <Teleport to="body">
     <div
       v-if="open"
-      class="absolute left-0 top-full z-50 mt-1 w-[300px] rounded-lg border border-slate-200 bg-white p-3 shadow-lg"
+      id="date-range-picker-panel"
+      class="fixed z-[9999] w-[300px] rounded-lg border border-slate-200 bg-white p-3 shadow-lg"
+      :style="{ top: popupTop + 'px', left: popupLeft + 'px' }"
     >
       <div class="mb-2 flex items-center justify-between">
         <button type="button" class="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100" @click="prevMonth">‹</button>
@@ -238,5 +279,5 @@ const displayText = computed(() => {
         </span>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
