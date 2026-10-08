@@ -84,6 +84,111 @@ def _is_login_url(url: str) -> bool:
     return "passport.goofish.com" in lowered or "mini_login" in lowered
 
 
+async def _check_login_expired(page) -> None:
+    """检测闲鱼登录状态是否失效：跳转登录页 或 页面弹出登录框 iframe。
+
+    弱登录（_m_h5_tk 签名 token 过期）时闲鱼不会重定向，而是在页面上
+    弹出 #alibaba-login-box 登录框，点击任何筛选/翻页都会被拦截，
+    导致搜索结果退化为历史老商品（“最新发布过滤 N -> 0”的假象）。
+    检测到任一信号立即抛出 LoginRequiredError，带可操作的修复指引。
+    """
+    if _is_login_url(page.url):
+        raise LoginRequiredError(
+            "检测到登录状态已失效（页面跳转到闲鱼登录页），"
+            "请到『设置 → 账号管理』页面重新登录后重试。"
+        )
+    try:
+        login_box = page.locator("#alibaba-login-box")
+        if await login_box.count() and await login_box.first.is_visible():
+            print(
+                "\n==================== 登录失效检测 ====================\n"
+                "检测到闲鱼登录框弹出，当前登录状态已失效。\n"
+                "原因通常是登录态签名过期（_m_h5_tk），工具只能拿到降级的老商品数据。\n"
+                "请到『设置 → 账号管理』页面重新登录后重试。\n"
+                "======================================================"
+            )
+            raise LoginRequiredError(
+                "检测到登录状态已失效（闲鱼弹出登录框），"
+                "请到『设置 → 账号管理』页面重新登录后重试。"
+            )
+    except LoginRequiredError:
+        raise
+    except Exception:
+        # 登录框未出现属正常情况；其他异常不阻塞主流程
+        pass
+
+
+def resolve_effective_state_path(task_config: dict) -> str:
+    """解析任务实际使用的登录态文件路径（与 scraper 账号选择逻辑一致）。"""
+    account_file = str(task_config.get("account_state_file") or "").strip()
+    if account_file:
+        return account_file
+    if os.path.exists(STATE_FILE):
+        return STATE_FILE
+    state_dir = os.getenv("ACCOUNT_STATE_DIR", "state").strip().strip('"').strip("'")
+    if os.path.isdir(state_dir):
+        names = sorted(
+            n for n in os.listdir(state_dir) if n.lower().endswith(".json")
+        )
+        if names:
+            return os.path.join(state_dir, names[0])
+    return STATE_FILE
+
+
+def check_state_file_login_valid(
+    state_path: str, buffer_seconds: int = 600
+) -> tuple[bool, str]:
+    """启动前快速检查登录态签名 token（_m_h5_tk/_m_h5_tk_enc）是否过期。
+
+    返回 (是否有效, 提示文案)。过期/临期时提示用户到『账号管理』更新 cookie，
+    避免任务白跑一遍只拿到降级的老商品数据。
+    """
+    if not os.path.exists(state_path):
+        return (
+            False,
+            f"登录状态文件不存在：{state_path}，请到『账号管理』页面添加或更新账号。",
+        )
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        return (
+            False,
+            f"读取登录状态文件失败：{e}，请到『账号管理』页面更新账号。",
+        )
+
+    cookies = data.get("cookies") or []
+    now = time.time()
+    issues: list[str] = []
+    for name in ("_m_h5_tk", "_m_h5_tk_enc"):
+        cookie = next((c for c in cookies if c.get("name") == name), None)
+        if cookie is None:
+            issues.append(f"{name} 缺失")
+            continue
+        exp = cookie.get("expires")
+        if exp is None or float(exp) <= 0:
+            # 无过期时间的 session cookie 视为仍有效
+            continue
+        exp_f = float(exp)
+        if exp_f < now:
+            issues.append(
+                f"{name} 已于 {time.strftime('%Y-%m-%d %H:%M', time.localtime(exp_f))} 过期"
+            )
+        elif exp_f < now + buffer_seconds:
+            issues.append(
+                f"{name} 将于 {time.strftime('%Y-%m-%d %H:%M', time.localtime(exp_f))} 过期"
+            )
+
+    if issues:
+        return (
+            False,
+            "登录状态已失效（" + "；".join(issues) + "）。"
+            "请到『账号管理』页面，点击该账号所在行的『更新』按钮，"
+            "重新提取并保存闲鱼登录状态后再启动任务。",
+        )
+    return True, ""
+
+
 def _resolve_browser_channel() -> str:
     global EDGE_DOCKER_WARNING_PRINTED
     # 允许通过 BROWSER_CHANNEL 环境变量覆盖浏览器通道。
@@ -695,7 +800,8 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     )
                     if _is_login_url(page.url):
                         raise LoginRequiredError(
-                            f"Login required: redirected to {page.url} (cookies/state likely expired)"
+                            "检测到登录状态已失效（页面跳转到闲鱼登录页），"
+                            "请到『设置 → 账号管理』页面重新登录后重试。"
                         )
 
                     # 捕获初始搜索的API数据（在上下文内等待响应到达）
@@ -707,13 +813,17 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 except PlaywrightTimeoutError as e:
                     if _is_login_url(page.url):
                         raise LoginRequiredError(
-                            f"Login required: redirected to {page.url} (cookies/state likely expired)"
+                            "检测到登录状态已失效（页面跳转到闲鱼登录页），"
+                            "请到『设置 → 账号管理』页面重新登录后重试。"
                         ) from e
                     raise
 
                 # 模拟真实用户行为：页面加载后的初始停留和浏览
                 log_time("[反爬] 模拟用户查看页面...")
                 await random_sleep(1, 3)
+
+                # --- 登录状态失效检测：跳转登录页或页面弹出登录框 ---
+                await _check_login_expired(page)
 
                 # --- 新增：检查是否存在验证弹窗 ---
                 baxia_dialog = page.locator("div.baxia-dialog-mask")
@@ -787,8 +897,12 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         log_time(
                             f"新发布筛选 '{new_publish_option}' 请求超时，继续执行。"
                         )
+                        # 超时通常是被登录框 iframe 拦截点击所致，立即检测登录状态
+                        await _check_login_expired(page)
                     except Exception as e:
                         print(f"LOG: 应用新发布筛选失败: {e}")
+                    # 筛选点击后检查登录框（弱登录时点击会被登录框拦截/触发登录框）
+                    await _check_login_expired(page)
 
                 if personal_only:
                     async with page.expect_response(
@@ -956,6 +1070,8 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     log_time(f"开始处理第 {page_num}/{max_pages} 页 ...")
 
                     if page_num > 1:
+                        # 翻页前检测登录失效（翻页点击同样会被登录框拦截）
+                        await _check_login_expired(page)
                         page_advance_result = await advance_search_page(
                             page=page,
                             page_num=page_num,
@@ -991,8 +1107,10 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                             if before_count > 0 and not kept:
                                 log_time(
                                     f"提示：本页暂无 {NEW_PUBLISH_MINUTES} 分钟内的新品，"
-                                    f"继续翻页查找；若长期为 0，建议在任务设置中改用"
-                                    f"“1天内/3天内”发布范围，命中率更高。"
+                                    f"继续翻页查找；若长期为 0，可到任务设置改用"
+                                    f"“1天内/3天内”发布范围命中率更高；"
+                                    f"若手动打开闲鱼能看到近期发布的商品而工具抓到 0 条，"
+                                    f"通常是登录态失效，请到『设置 → 账号管理』重新登录。"
                                 )
                         # 移除内部字段，避免进入详情/AI 分析/存储下游
                         for it in basic_items:
@@ -1333,7 +1451,12 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
             break
         except LoginRequiredError as e:
             last_error = str(e)
-            print(f"检测到登录失效/重定向: {e}")
+            print(
+                "\n==================== 登录失效 ====================\n"
+                f"{e}\n"
+                "修复方式：打开本工具的『设置 → 账号管理』页面，重新登录闲鱼账号。\n"
+                "===================================================="
+            )
             break
         except RiskControlError as e:
             last_error = str(e)

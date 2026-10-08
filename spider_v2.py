@@ -9,7 +9,11 @@ import re
 
 from src.config import STATE_FILE
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
-from src.scraper import scrape_xianyu
+from src.scraper import (
+    check_state_file_login_valid,
+    resolve_effective_state_path,
+    scrape_xianyu,
+)
 
 
 async def main():
@@ -177,6 +181,20 @@ async def main():
         print("没有需要执行的任务，程序退出。")
         return
 
+    # --- 启动前登录状态检查：签名 token 过期则提示去账号管理更新，跳过该任务 ---
+    for task_conf in active_task_configs:
+        state_path = resolve_effective_state_path(task_conf)
+        ok, reason = check_state_file_login_valid(state_path)
+        task_conf["_login_expired"] = not ok
+        if not ok:
+            print(
+                "\n==================== 登录失效检测 ====================\n"
+                f"任务 '{task_conf['task_name']}' 未启动：{reason}\n"
+                "===================================================="
+            )
+        else:
+            print(f"任务 '{task_conf['task_name']}' 登录状态有效，正常启动。")
+
     # 为每个启用的任务创建一个异步执行协程
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -188,6 +206,12 @@ async def main():
 
     tasks = []
     for task_conf in active_task_configs:
+        if task_conf.get("_login_expired"):
+            print(
+                f"-> 任务 '{task_conf['task_name']}' 因登录状态失效已跳过，"
+                f"请到『账号管理』页面点击『更新』重新提取 cookie。"
+            )
+            continue
         print(f"-> 任务 '{task_conf['task_name']}' 已加入执行队列。")
         tasks.append(asyncio.create_task(scrape_xianyu(task_config=task_conf, debug_limit=args.debug_limit)))
 
