@@ -593,10 +593,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     if new_publish_option == "__none__":
         new_publish_option = ""
     region_filter = (task_config.get("region") or "").strip()
-    # "最新"选项（不限时间、按发布时间排序）时，第 1 页往往以老商品为主，
-    # 强制至少多抓几页，再按发布时间过滤，提高新商品命中率。
-    if new_publish_option == "最新":
-        max_pages = max(int(max_pages), 3)
+    # 注：不再强制提高页数，完全尊重任务设置的 max_pages。
+    # "最新"排序不限发布时间（仅按发布时间倒序），若 1 页过滤后新品为 0，
+    # 属正常现象，可在任务设置里自行加大页数提高命中率。
 
     processed_links = set()
     history_run_id = datetime.now().strftime("%Y%m%d%H%M%S")
