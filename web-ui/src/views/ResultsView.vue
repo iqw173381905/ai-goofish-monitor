@@ -42,6 +42,17 @@ const isDeleteDialogOpen = ref(false)
 const isBlacklistDialogOpen = ref(false)
 const blacklistDraft = ref('')
 
+// 合并 AI/关键词推荐筛选为单一"仅查看推荐"开关：
+// 同时置位 ai_recommended_only 与 keyword_recommended_only，
+// 后端将其合并为"只看推荐"（is_recommended=1，不限来源）。
+const recommendedOnly = computed({
+  get: () => filters.ai_recommended_only && filters.keyword_recommended_only,
+  set: (value: boolean) => {
+    filters.ai_recommended_only = value
+    filters.keyword_recommended_only = value
+  },
+})
+
 const selectedTaskLabel = computed(() => {
   if (!selectedFile.value || fileOptions.value.length === 0) return null
   const match = fileOptions.value.find((option) => option.value === selectedFile.value)
@@ -143,8 +154,7 @@ async function handleSaveBlacklistRules() {
       :file-options="fileOptions"
       :is-ready="isFileOptionsReady"
       v-model:selectedFile="selectedFile"
-      v-model:aiRecommendedOnly="filters.ai_recommended_only"
-      v-model:keywordRecommendedOnly="filters.keyword_recommended_only"
+      v-model:recommendedOnly="recommendedOnly"
       v-model:includeHidden="filters.include_hidden"
       v-model:sortBy="filters.sort_by"
       v-model:sortOrder="filters.sort_order"

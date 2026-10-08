@@ -92,11 +92,10 @@ async def get_result_file_content(
     sort_order: str = Query("desc"),
 ):
     """读取指定的 .jsonl 文件内容，支持分页、筛选和排序"""
-    if ai_recommended_only and keyword_recommended_only:
-        raise HTTPException(status_code=400, detail="AI推荐筛选与关键词推荐筛选不能同时开启。")
-
+    # AI 推荐与关键词推荐可同时开启，合并为"只看推荐"（不限来源）
     if recommended_only and not ai_recommended_only and not keyword_recommended_only:
         ai_recommended_only = True
+        keyword_recommended_only = True
 
     try:
         validate_result_filename(filename)
@@ -147,10 +146,10 @@ async def export_result_file_content(
     sort_by: str = Query("crawl_time"),
     sort_order: str = Query("desc"),
 ):
-    if ai_recommended_only and keyword_recommended_only:
-        raise HTTPException(status_code=400, detail="AI推荐筛选与关键词推荐筛选不能同时开启。")
+    # AI 推荐与关键词推荐可同时开启，合并为"只看推荐"（不限来源）
     if recommended_only and not ai_recommended_only and not keyword_recommended_only:
         ai_recommended_only = True
+        keyword_recommended_only = True
 
     try:
         validate_result_filename(filename)

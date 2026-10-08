@@ -55,11 +55,14 @@ def _build_query_conditions(
 ) -> tuple[str, list]:
     conditions = ["result_filename = ?"]
     params: list = [filename]
-    if ai_recommended_only:
+    if ai_recommended_only and keyword_recommended_only:
+        # 合并语义：AI 推荐 + 关键词推荐同时开启 = "只看推荐"（is_recommended 即可，不限来源）
+        conditions.append("is_recommended = 1")
+    elif ai_recommended_only:
         conditions.append("is_recommended = 1")
         conditions.append("analysis_source = ?")
         params.append("ai")
-    if keyword_recommended_only:
+    elif keyword_recommended_only:
         conditions.append("is_recommended = 1")
         conditions.append("analysis_source = ?")
         params.append("keyword")

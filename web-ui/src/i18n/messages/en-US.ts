@@ -147,6 +147,8 @@ const enUS = {
       sortByKeywordHits: 'Keyword Hits',
       desc: 'Descending',
       asc: 'Ascending',
+      showAll: 'All',
+      recommendedOnly: 'Recommended only',
       aiOnly: 'AI recommendations only',
       keywordOnly: 'Keyword recommendations only',
       includeHidden: 'Show hidden items',
