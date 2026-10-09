@@ -11,7 +11,6 @@ src/__pycache__/
 dist/
 state/
 config.json
-prompts/
 .serena/
 price_history/
 data/
