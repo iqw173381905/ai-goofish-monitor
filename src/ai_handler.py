@@ -377,6 +377,10 @@ def _summarize_product_json(product_data: dict) -> str:
             "卖家昵称": seller.get("卖家昵称") or product_data.get("seller_nickname"),
             "卖家信用": seller.get("卖家信用"),
             "卖家等级": seller.get("卖家等级"),
+            # 附加"分析当前时间"供 AI 判断发布时间合理性：
+            # 模型训练截止日期可能早于当前日期，看到近期日期会误判为"未来时间"，
+            # 给出明确参照后即可正确判断（发布时间≤当前时间即为正常）。
+            "分析当前时间": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
         if not info:
             for k in ("title", "价格", "price", "描述", "desc", "description"):
