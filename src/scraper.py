@@ -57,7 +57,10 @@ from src.services.price_history_service import (
     load_price_snapshots,
     record_market_snapshots,
 )
-from src.services.result_storage_service import load_processed_link_keys
+from src.services.result_storage_service import (
+    load_failed_ai_analysis_keys,
+    load_processed_link_keys,
+)
 from src.services.seller_profile_cache import SellerProfileCache
 from src.services.search_pagination import (
     advance_search_page,
@@ -623,6 +626,11 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
     else:
         print(f"LOG: 结果集 {result_filename} 当前为空，将写入新记录。")
 
+    # 历史 AI 分析异常（失败/缺字段）的商品：下次运行不跳过，重新尝试 AI 分析
+    failed_ai_keys = load_failed_ai_analysis_keys(keyword)
+    if failed_ai_keys:
+        print(f"LOG: 发现 {len(failed_ai_keys)} 个历史 AI 分析异常商品，本次运行将重新尝试 AI 分析。")
+
     rotation_settings = _get_rotation_settings(task_config)
     account_items = load_state_files(rotation_settings["account_state_dir"])
     runtime_plan = resolve_account_runtime_plan(
@@ -1182,11 +1190,15 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                             break
 
                         unique_key = get_link_unique_key(item_data["商品链接"])
-                        if unique_key in processed_links:
+                        if unique_key in processed_links and unique_key not in failed_ai_keys:
                             log_time(
                                 f"[页内进度 {i}/{total_items_on_page}] 商品 '{item_data['商品标题'][:20]}...' 已存在，跳过。"
                             )
                             continue
+                        if unique_key in failed_ai_keys:
+                            log_time(
+                                f"[页内进度 {i}/{total_items_on_page}] 商品 '{item_data['商品标题'][:20]}...' 历史 AI 分析异常，重新尝试分析。"
+                            )
 
                         log_time(
                             f"[页内进度 {i}/{total_items_on_page}] 发现新商品，获取详情: {item_data['商品标题'][:30]}..."

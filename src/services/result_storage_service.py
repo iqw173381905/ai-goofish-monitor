@@ -195,11 +195,26 @@ def _save_result_record_sync(record: dict, keyword: str) -> bool:
     with sqlite_connection() as conn:
         conn.execute(
             """
-            INSERT OR IGNORE INTO result_items (
+            INSERT INTO result_items (
                 result_filename, keyword, task_name, crawl_time, publish_time, price,
                 price_display, item_id, title, link, link_unique_key, seller_nickname,
                 is_recommended, analysis_source, keyword_hit_count, raw_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(result_filename, link_unique_key) DO UPDATE SET
+                keyword=excluded.keyword,
+                task_name=excluded.task_name,
+                crawl_time=excluded.crawl_time,
+                publish_time=excluded.publish_time,
+                price=excluded.price,
+                price_display=excluded.price_display,
+                item_id=excluded.item_id,
+                title=excluded.title,
+                link=excluded.link,
+                seller_nickname=excluded.seller_nickname,
+                is_recommended=excluded.is_recommended,
+                analysis_source=excluded.analysis_source,
+                keyword_hit_count=excluded.keyword_hit_count,
+                raw_json=excluded.raw_json
             """,
             (
                 build_result_filename(keyword),
@@ -233,6 +248,38 @@ def load_processed_link_keys(keyword: str) -> set[str]:
             (filename,),
         ).fetchall()
     return {str(row["link_unique_key"]) for row in rows if row["link_unique_key"]}
+
+
+def load_failed_ai_analysis_keys(keyword: str) -> set[str]:
+    """返回该结果集中 AI 分析异常（失败/缺字段/无分析结果）的商品 unique_key 集合。
+
+    判定标准：raw_json 中 ai_analysis 为空，或 ai_analysis.error 非空，
+    或 reason 以 "AI分析异常" 开头。任务再次运行时会对这些商品重新尝试 AI 分析。
+    """
+    bootstrap_sqlite_storage()
+    filename = build_result_filename(keyword)
+    with sqlite_connection() as conn:
+        rows = conn.execute(
+            "SELECT link_unique_key, raw_json FROM result_items WHERE result_filename = ?",
+            (filename,),
+        ).fetchall()
+    failed: set[str] = set()
+    for row in rows:
+        key = str(row["link_unique_key"] or "")
+        if not key:
+            continue
+        try:
+            record = json.loads(row["raw_json"]) if row["raw_json"] else {}
+        except Exception:
+            continue
+        analysis = record.get("ai_analysis") or {}
+        if not isinstance(analysis, dict):
+            continue
+        error = analysis.get("error")
+        reason = str(analysis.get("reason") or "")
+        if error or reason.startswith("AI分析异常") or not analysis:
+            failed.add(key)
+    return failed
 
 
 async def list_result_filenames() -> list[str]:
