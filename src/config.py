@@ -5,7 +5,10 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 # --- AI & Notification Configuration ---
-load_dotenv()
+# override=True：.env 文件始终覆盖继承的环境变量。
+# 否则服务进程先启动后用户再改 .env（如切换 AI 模型），子任务进程会
+# 继承服务进程的旧值（如旧模型名），导致改了不生效。
+load_dotenv(override=True)
 
 # --- File Paths & Directories ---
 STATE_FILE = "xianyu_state.json"
