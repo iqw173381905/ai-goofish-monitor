@@ -300,6 +300,38 @@ def _as_int(value, default: int) -> int:
         return default
 
 
+def _extract_video_cover(item_do: dict) -> str:
+    """从商品详情中提取视频封面图 URL（商品仅视频无图片时使用）。
+
+    依次尝试常见字段：videoInfo / videoList / videos / videoInfos / 顶层 cover 字段。
+    """
+    candidates = []
+
+    def _collect(obj, keys):
+        if not isinstance(obj, dict):
+            return
+        for k in keys:
+            v = obj.get(k)
+            if isinstance(v, str) and v.startswith("http"):
+                candidates.append(v)
+
+    cover_keys = ("coverUrl", "cover", "videoCover", "picUrl", "thumbUrl", "imageUrl")
+
+    video_info = item_do.get("videoInfo")
+    if isinstance(video_info, dict):
+        _collect(video_info, cover_keys)
+
+    for key in ("videoList", "videos", "videoInfos"):
+        vlist = item_do.get(key)
+        if isinstance(vlist, list):
+            for vid in vlist:
+                _collect(vid, cover_keys)
+
+    _collect(item_do, ("videoCover", "videoCoverUrl", "coverUrl", "mainVideoCover"))
+
+    return candidates[0] if candidates else ""
+
+
 def _get_rotation_settings(task_config: dict) -> dict:
     account_cfg = task_config.get("account_rotation") or {}
     proxy_cfg = task_config.get("proxy_rotation") or {}
@@ -1282,6 +1314,26 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                                         item_data["商品主图链接"] = all_image_urls[0]
 
                                 # --- END: 新增代码块 ---
+
+                                # --- START: 视频商品封面兜底 ---
+                                # 若商品没有图片（仅视频），从视频信息中提取封面图作为主图，
+                                # 供结果查看/通知/AI分析使用
+                                if not item_data.get("商品主图链接"):
+                                    video_cover = _extract_video_cover(item_do)
+                                    if video_cover:
+                                        item_data["商品主图链接"] = video_cover
+                                        existing_images = item_data.get(
+                                            "商品图片列表", []
+                                        )
+                                        if not existing_images:
+                                            item_data["商品图片列表"] = [video_cover]
+                                        elif video_cover not in existing_images:
+                                            item_data["商品图片列表"].append(
+                                                video_cover
+                                            )
+                                        item_data["商品媒体类型"] = "视频(仅封面)"
+                                # --- END: 视频商品封面兜底 ---
+
                                 item_data["“想要”人数"] = await safe_get(
                                     item_do,
                                     "wantCnt",
