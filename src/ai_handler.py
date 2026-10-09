@@ -342,6 +342,45 @@ def validate_ai_response_format(parsed_response):
     return True
 
 
+def _compute_fallback_value_score(parsed_response: dict) -> int:
+    """模型未输出 value_score 时，依据 is_recommended 与 criteria_analysis 各维度状态推算价值分(0-100)。
+
+    PASS/通过/OK=1 分，NEEDS_MANUAL_CHECK/待确认=0.5 分，FAIL/不通过=0 分。
+    最后与 is_recommended 对齐：推荐至少 60，不推荐至多 40，避免前端显示
+    “AI MATCH 0%” 与推荐结论互相矛盾。
+    """
+    criteria = parsed_response.get("criteria_analysis") or {}
+    total, weighted = 0, 0.0
+    for key, val in criteria.items():
+        if not isinstance(val, dict):
+            continue
+        status = str(val.get("status", "")).strip().upper()
+        if status in ("PASS", "OK", "通过", "符合", "达标"):
+            score = 1.0
+        elif status in (
+            "NEEDS_MANUAL_CHECK",
+            "MANUAL",
+            "待确认",
+            "待手动确认",
+            "缺失",
+            "未知",
+        ):
+            score = 0.5
+        elif status in ("FAIL", "不通过", "不符合", "未达标"):
+            score = 0.0
+        else:
+            score = 0.5
+        total += 1
+        weighted += score
+    if total == 0:
+        base = 85 if parsed_response.get("is_recommended") else 15
+    else:
+        base = int(round(weighted / total * 100))
+    if parsed_response.get("is_recommended"):
+        return max(base, 60)
+    return min(base, 40)
+
+
 @retry_on_failure(retries=3, delay=5)
 async def send_ntfy_notification(product_data, reason):
     """兼容旧调用名，内部统一走 NotificationService。"""
@@ -546,6 +585,13 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
 
                 # 验证响应格式
                 if validate_ai_response_format(parsed_response):
+                    # value_score 兜底：模型未输出价值分时，依据 is_recommended 与
+                    # criteria_analysis 各维度状态推算，避免前端显示 AI MATCH 0%
+                    # 与推荐结论互相矛盾
+                    if parsed_response.get("value_score") is None:
+                        parsed_response["value_score"] = _compute_fallback_value_score(
+                            parsed_response
+                        )
                     safe_print(f"   [AI分析] 第{attempt + 1}次尝试成功，响应格式验证通过")
                     return parsed_response
                 safe_print(f"   [AI分析] 第{attempt + 1}次尝试格式验证失败")
