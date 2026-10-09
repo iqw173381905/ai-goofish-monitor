@@ -138,9 +138,9 @@ class ItemAnalysisDispatcher:
             # 曾无条件提取 URL，导致关闭开关仍分析图片）。
             if job.analyze_images:
                 image_urls = self._get_image_urls(record)
-                # 优先图片 URL 直传（中转处理快）；URL 为空时才下载本地图作 base64 回退
-                if not image_urls:
-                    image_paths = await self._download_images(job, record)
+                # 闲鱼图片 URL 有防盗链，中转站直接拉取会失败（HTTP 420/400），
+                # 因此优先下载到本地转 base64 传图；本地图下载失败时才回退 URL 直传。
+                image_paths = await self._download_images(job, record)
             if not job.prompt_text:
                 return self._build_ai_error_result("任务未配置AI prompt，跳过分析。")
             ai_result = await self._ai_analyzer(record, image_paths, job.prompt_text, image_urls=image_urls)

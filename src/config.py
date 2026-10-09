@@ -62,6 +62,8 @@ IMAGE_DOWNLOAD_HEADERS = {
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
+    # 闲鱼图片 CDN 防盗链：必须带闲鱼站内 Referer，否则返回 420/403
+    'Referer': 'https://www.goofish.com/',
 }
 
 # --- Client Initialization ---
