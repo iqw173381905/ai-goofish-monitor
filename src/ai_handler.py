@@ -408,7 +408,20 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
             if isinstance(u, str) and u.strip().startswith("http"):
                 remote_urls.append(u.strip())
 
-    safe_print(f"\n   [AI分析] 开始分析商品 #{product_id} (含 {len(remote_urls or [])} 张图片, URL直传)...")
+    image_data_urls = []
+    if image_paths:
+        for path in image_paths:
+            base64_image = encode_image_to_base64(path)
+            if base64_image:
+                image_data_urls.append(f"data:image/jpeg;base64,{base64_image}")
+
+    # 本地下载图片（base64）优先：闲鱼图片 URL 有防盗链，中转站直接拉取会被拒绝
+    # （HTTP 420/400），因此任务下载到本地后以 base64 传图；无本地图才回退 URL 直传。
+    effective_images = image_data_urls or remote_urls
+    safe_print(
+        f"\n   [AI分析] 开始分析商品 #{product_id} (含 {len(effective_images)} 张图片, "
+        f"{'本地base64' if image_data_urls else 'URL直传'})..."
+    )
     safe_print(f"   [AI分析] 标题: {item_info.get('商品标题', '无')}")
 
     if not prompt_text:
@@ -426,19 +439,12 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
         safe_print(prompt_text)
         safe_print("-------------------\n")
 
-    image_data_urls = []
-    if not remote_urls and image_paths:
-        for path in image_paths:
-            base64_image = encode_image_to_base64(path)
-            if base64_image:
-                image_data_urls.append(f"data:image/jpeg;base64,{base64_image}")
-
     combined_text_prompt = build_analysis_text_prompt(
         product_details_json,
         prompt_text,
-        include_images=bool(remote_urls or image_data_urls),
+        include_images=bool(effective_images),
     )
-    user_content = build_user_message_content(combined_text_prompt, remote_urls or image_data_urls)
+    user_content = build_user_message_content(combined_text_prompt, effective_images)
     messages = [{"role": "user", "content": user_content}]
 
     # 保存最终传输内容到日志文件
@@ -459,8 +465,8 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
             "task_name": task_name,
             "product_id": product_id,
             "title": item_info.get("商品标题", "无"),
-            "image_count": len(remote_urls or image_data_urls),
-            "image_mode": "url" if remote_urls else ("base64" if image_data_urls else "none"),
+            "image_count": len(effective_images),
+            "image_mode": "base64" if image_data_urls else ("url" if remote_urls else "none"),
         }
         log_content = json.dumps(log_payload, ensure_ascii=False)
 
