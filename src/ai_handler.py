@@ -485,9 +485,18 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
     use_response_format = ENABLE_RESPONSE_FORMAT
     use_temperature = True
     for attempt in range(max_retries):
+        if attempt > 0:
+            # 重试间隔：给中转站/上游喘息时间，避免连续重试全部撞在同一波故障
+            await asyncio.sleep(min(2 + attempt * 2, 8))
         try:
             # 根据重试次数调整参数
             current_temperature = 0.1 if attempt == 0 else 0.05  # 重试时使用更低的温度
+            # 第 2 次起去掉 response_format：部分中转站对该参数不稳定（有时返回空），
+            # 两种参数都试一遍，提高命中成功率
+            if attempt >= 1:
+                use_response_format = False
+            # 第 3 次起降低输出长度限制，减轻生成压力
+            max_output_tokens = 1200 if attempt < 2 else 600
 
             from src.config import get_ai_request_params
 
@@ -496,7 +505,7 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
                 model=MODEL_NAME,
                 messages=messages,
                 temperature=current_temperature,
-                max_output_tokens=1200,
+                max_output_tokens=max_output_tokens,
                 enable_json_output=use_response_format,
             )
             if not use_temperature:
@@ -548,6 +557,9 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
                 raise e
             except EmptyAIResponseError as e:
                 safe_print(f"   [AI分析] 第{attempt + 1}次尝试返回空响应: {e}")
+                if attempt >= 1 and use_response_format:
+                    use_response_format = False
+                    safe_print("   [AI分析] 空响应，后续重试将禁用 response_format 参数。")
                 if attempt < max_retries - 1:
                     safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
                     continue
