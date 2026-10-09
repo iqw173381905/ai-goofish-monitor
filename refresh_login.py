@@ -273,6 +273,8 @@ def main() -> None:
         page.wait_for_timeout(3000)
         # 访问搜索页：页面会调用闲鱼搜索 API，响应会 Set-Cookie 轮换 _m_h5_tk。
         # 只打开首页不一定触发签名接口，导致"刷新了但 cookie 没更新"。
+        # 注意：访问搜索页后必须停留足够久（等搜索 API 返回并下发新 token），
+        # 期间不能导航走，否则轮换的 Set-Cookie 会被导航打断。
         for attempt in range(2):
             try:
                 log(f"访问搜索页触发签名 token 轮换（第 {attempt + 1} 次）...")
@@ -281,21 +283,17 @@ def main() -> None:
                     timeout=45000,
                     wait_until="domcontentloaded",
                 )
-                page.wait_for_timeout(6000)
             except Exception as exc:
                 log(f"访问搜索页失败（不影响，继续）: {exc}")
                 page.wait_for_timeout(6000)
+            # 停留等搜索 API 返回并 Set-Cookie 下发新 token（诊断实测需约 8-10 秒）
+            page.wait_for_timeout(10000)
             try:
                 page.evaluate("window.scrollTo(0, 500)")
             except Exception:
                 pass
             page.wait_for_timeout(3000)
-            # 检查 token 是否已轮换
-            try:
-                page.goto(GOOFISH_HOME, timeout=45000, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
-            except Exception:
-                pass
+            # 检查 token 是否已轮换（不导航走，直接在当前页面读 cookie）
             _cur_tk = next(
                 (c for c in ctx.cookies() if c.get("name") == "_m_h5_tk" and "goofish.com" in (c.get("domain") or "")),
                 None,
