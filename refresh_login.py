@@ -255,18 +255,57 @@ def main() -> None:
 
         # ---------- 3. 跳转闲鱼首页，等待新 token 下发 ----------
         log("跳转闲鱼首页，等待网关下发新签名 token...")
+        old_tk_value = None
+        try:
+            if STATE_FILE.exists():
+                with open(STATE_FILE, "r", encoding="utf-8") as _f:
+                    _old = json.load(_f)
+                _old_tk = next((c for c in (_old.get("cookies") or []) if c.get("name") == "_m_h5_tk"), None)
+                old_tk_value = _old_tk.get("value") if _old_tk else None
+        except Exception:
+            pass
         try:
             page.goto(GOOFISH_HOME, timeout=45000, wait_until="domcontentloaded")
         except Exception as exc:
             log(f"打开闲鱼首页失败: {exc}")
             ctx.close()
             sys.exit(1)
-        page.wait_for_timeout(6000)
-        try:
-            page.evaluate("window.scrollTo(0, 300)")
-        except Exception:
-            pass
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(3000)
+        # 访问搜索页：页面会调用闲鱼搜索 API，响应会 Set-Cookie 轮换 _m_h5_tk。
+        # 只打开首页不一定触发签名接口，导致"刷新了但 cookie 没更新"。
+        for attempt in range(2):
+            try:
+                log(f"访问搜索页触发签名 token 轮换（第 {attempt + 1} 次）...")
+                page.goto(
+                    "https://www.goofish.com/search?q=%E6%89%8B%E8%A1%A8",
+                    timeout=45000,
+                    wait_until="domcontentloaded",
+                )
+                page.wait_for_timeout(6000)
+            except Exception as exc:
+                log(f"访问搜索页失败（不影响，继续）: {exc}")
+                page.wait_for_timeout(6000)
+            try:
+                page.evaluate("window.scrollTo(0, 500)")
+            except Exception:
+                pass
+            page.wait_for_timeout(3000)
+            # 检查 token 是否已轮换
+            try:
+                page.goto(GOOFISH_HOME, timeout=45000, wait_until="domcontentloaded")
+                page.wait_for_timeout(3000)
+            except Exception:
+                pass
+            _cur_tk = next(
+                (c for c in ctx.cookies() if c.get("name") == "_m_h5_tk" and "goofish.com" in (c.get("domain") or "")),
+                None,
+            )
+            if _cur_tk is None:
+                continue
+            if old_tk_value and _cur_tk.get("value") == old_tk_value and attempt == 0:
+                log("token 暂未轮换，再试一次...")
+                continue
+            break
 
         # ---------- 4. 导出 cookies 写回 state ----------
         cookies = ctx.cookies()
@@ -305,6 +344,13 @@ def main() -> None:
         tk = next((c for c in norm if c["name"] == "_m_h5_tk"), None)
         if tk:
             log(f"新 _m_h5_tk 过期时间: {to_unix_local(tk.get('expires', 0))}")
+            if old_tk_value and tk.get("value") == old_tk_value:
+                log(
+                    "警告：新 _m_h5_tk 与旧值相同，网关可能未下发新 token；"
+                    "若任务仍报登录失效，请再运行一次刷新或稍后重试。"
+                )
+            else:
+                log("_m_h5_tk 已轮换为新值，续期成功。")
         else:
             log("警告：未找到 _m_h5_tk，可能需要重新登录确认。")
 
