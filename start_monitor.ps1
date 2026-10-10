@@ -45,6 +45,11 @@ if (-not $alive) {
     }
     Start-Sleep -Seconds 2
     Wait-PortFree | Out-Null
+    # 关键：清除豆包客户端注入的沙箱 Python 环境变量（PYTHONPATH/PYTHONHOME），
+    # 否则任务/续期等 python 子进程继承后 "Failed to import encodings" 崩溃
+    $env:PYTHONPATH = ''
+    $env:PYTHONHOME = ''
+    $env:PYTHONSTARTUP = ''
     $errLog = "$logDir\uvicorn_err.log"
     $outLog = "$logDir\uvicorn_out.log"
     Start-Process -FilePath $python -ArgumentList "$workDir\run_server.py" -WorkingDirectory $workDir -WindowStyle Hidden -RedirectStandardError $errLog -RedirectStandardOutput $outLog

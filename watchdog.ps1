@@ -39,6 +39,11 @@ function Wait-PortFree {
 
 function Start-Server {
     Wait-PortFree | Out-Null
+    # 关键：清除豆包客户端注入的沙箱 Python 环境变量，
+    # 否则任务/续期等 python 子进程继承后 "Failed to import encodings" 崩溃
+    $env:PYTHONPATH = ''
+    $env:PYTHONHOME = ''
+    $env:PYTHONSTARTUP = ''
     # 用 python.exe 隐藏窗口 + 输出重定向运行 run_server.py。
     # 说明：run_server.py 已禁用 uvicorn 日志（Windows 无控制台环境下
     # uvicorn 写日志会触发 buffer detached 崩溃）；重定向 stdout/stderr 到日志文件，
