@@ -172,10 +172,13 @@ def main() -> None:
     headless = os.environ.get("REFRESH_HEADLESS") == "1"
 
     with sync_playwright() as p:
-        # 持久化上下文：保存登录会话，后续刷新无需重新登录
-        ctx = p.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
+        # 使用普通 launch（非 persistent）：服务器上 profile 目录不持久化，
+        # cookie 统一从 acc_1.json 注入，避免 persistent context 的兼容性问题
+        browser = p.chromium.launch(
             headless=headless,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        ctx = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="zh-CN",
             user_agent=(
@@ -185,10 +188,9 @@ def main() -> None:
         )
         page = ctx.new_page()
 
-        # ---------- 0. 从 state 文件注入已有 cookie（服务器无持久化 profile 时用）----------
-        # launch_persistent_context 的 PROFILE_DIR 在服务器上可能不存在，
-        # 此时从 acc_1.json 加载 cookie，保证 token 轮换能基于有效会话进行
-        if not has_xianyu_session(ctx) and STATE_FILE.exists():
+        # ---------- 0. 从 state 文件注入已有 cookie ----------
+        # 服务器无持久化 profile，从 acc_1.json 加载 cookie，保证 token 轮换能基于有效会话进行
+        if STATE_FILE.exists():
             try:
                 with open(STATE_FILE, "r", encoding="utf-8") as _f:
                     _state = json.load(_f)
