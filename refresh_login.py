@@ -174,9 +174,14 @@ def main() -> None:
     with sync_playwright() as p:
         # 使用普通 launch（非 persistent）：服务器上 profile 目录不持久化，
         # cookie 统一从 acc_1.json 注入，避免 persistent context 的兼容性问题
+        # 注意：headless 时用 --headless=new 强制使用完整版 Chromium 的新 headless 模式，
+        # 避免 Playwright 去找未安装的 chromium_headless_shell
+        _args = ["--no-sandbox", "--disable-dev-shm-usage"]
+        if headless:
+            _args.append("--headless=new")
         browser = p.chromium.launch(
-            headless=headless,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            headless=False,
+            args=_args,
         )
         ctx = browser.new_context(
             viewport={"width": 1280, "height": 800},
