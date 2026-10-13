@@ -4,6 +4,8 @@ import sys
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+from src.infrastructure.external.ai_client import _sanitize_no_proxy_env
+
 # --- AI & Notification Configuration ---
 # override=True：.env 文件始终覆盖继承的环境变量。
 # 否则服务进程先启动后用户再改 .env（如切换 AI 模型），子任务进程会
@@ -73,6 +75,8 @@ if not all([BASE_URL, MODEL_NAME]):
     client = None
 else:
     try:
+        # 旧客户端和 AIClient 必须在创建前共用同一套 NO_PROXY 清理。
+        _sanitize_no_proxy_env()
         if PROXY_URL:
             print(f"正在为AI请求使用HTTP/S代理: {PROXY_URL}")
             # httpx 会自动从环境变量中读取代理设置
