@@ -235,8 +235,8 @@ const enUSExtra = {
     browser: {
       title: 'Browser Popup Notifications',
       description: 'Local popup, no third-party channel needed. The browser must allow notifications from this site.',
-      taskDoneNotify: 'Notify when a monitor run finishes',
-      taskDoneHint: 'When a task changes from "running" to "idle", show a browser system notification plus an in-page toast.',
+      taskDoneNotify: 'Notify when recommended products are found',
+      taskDoneHint: 'As soon as a recommended product is identified during a task run, show a browser system notification plus an in-page toast.',
       enabled: 'On',
       disabled: 'Off',
       taskDoneTitle: 'Recommended Found',

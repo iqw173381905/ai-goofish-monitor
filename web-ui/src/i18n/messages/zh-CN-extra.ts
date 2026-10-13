@@ -235,8 +235,8 @@ const zhCNExtra = {
     browser: {
       title: '浏览器弹窗通知',
       description: '本地弹窗，无需任何第三方渠道配置。需要浏览器允许本网站发送通知。',
-      taskDoneNotify: '监控运行完成时弹窗提醒',
-      taskDoneHint: '任务从"运行中"变为"空闲"时，弹出浏览器系统通知并显示页面提示。',
+      taskDoneNotify: '发现推荐商品时弹窗提醒',
+      taskDoneHint: '任务运行中一旦判断出推荐商品，立即弹出浏览器系统通知并显示页面提示。',
       enabled: '已开启',
       disabled: '已关闭',
       taskDoneTitle: '发现推荐商品',

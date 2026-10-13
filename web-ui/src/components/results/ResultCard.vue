@@ -29,6 +29,12 @@ const seller = props.item.卖家信息
 const ai = props.item.ai_analysis
 const priceInsight = props.item.price_insight
 
+// 原价为占位值时不显示（后端无原价时填"暂无"）
+const showOriginalPrice = computed(() => {
+  const v = props.item.info?.['商品原价']
+  return v && !['暂无', '-', 'N/A', '价格异常'].includes(String(v).trim())
+})
+
 const isRecommended = ai?.is_recommended === true
 const recommendationStatus = computed(() => {
   if (ai?.is_recommended === true) return { label: t('results.card.strongRecommend'), color: 'bg-emerald-500', icon: CheckCircle2, text: 'text-emerald-600', bg: 'bg-emerald-50' }
@@ -111,7 +117,7 @@ const expanded = ref(false)
       </div>
       <div class="flex items-baseline gap-1 mt-2">
         <span class="text-2xl font-bold text-rose-600 tracking-tight">{{ info.当前售价 }}</span>
-        <span v-if="info['商品原价']" class="text-xs text-slate-400 line-through mb-1">{{ info['商品原价'] }}</span>
+        <span v-if="showOriginalPrice" class="text-xs text-slate-400 line-through mb-1">{{ info['商品原价'] }}</span>
       </div>
     </CardHeader>
 
