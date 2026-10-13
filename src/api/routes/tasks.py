@@ -356,36 +356,36 @@ async def get_recommended_since(
     since: str,
     service: TaskService = Depends(get_task_service),
 ):
-    """返回任务在指定时间（ISO8601）之后新增的推荐商品数量。
+    """返回任务在指定时间（ISO8601）之后新增的推荐商品 ID 列表。
 
-    供前端任务完成通知使用：只有当本轮运行确实发现推荐商品时才弹窗，
-    避免每次任务跑完都打扰用户。
+    供前端推荐通知使用：返回具体的商品标识，前端按 ID 去重，
+    避免重复弹窗（即使计数逻辑重置也不会重复通知同一商品）。
     """
     task = await service.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务未找到")
     keyword = (task.keyword or "").strip()
     if not keyword:
-        return {"task_id": task_id, "count": 0, "since": since}
+        return {"task_id": task_id, "count": 0, "since": since, "items": []}
     filename = build_result_filename(keyword)
     try:
         since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="since 参数格式错误，需为 ISO8601 时间")
-    count = 0
+    items = []
     try:
         with sqlite_connection() as conn:
             # crawl_time 以 datetime.now().isoformat() 写入（如 2026-10-13T16:30:00.123456），
             # 字符串比较时统一用 ISO 格式前缀匹配
-            row = conn.execute(
-                "SELECT COUNT(*) FROM result_items "
+            rows = conn.execute(
+                "SELECT link_unique_key, title FROM result_items "
                 "WHERE result_filename = ? AND is_recommended = 1 AND crawl_time >= ?",
                 (filename, since_dt.isoformat()),
-            ).fetchone()
-            count = int(row[0]) if row else 0
+            ).fetchall()
+            items = [{"id": r[0], "title": r[1]} for r in rows if r[0]]
     except Exception as e:
         print(f"[推荐统计] 查询失败 task={task_id}: {e}")
-    return {"task_id": task_id, "count": count, "since": since}
+    return {"task_id": task_id, "count": len(items), "since": since, "items": items}
 
 
 @router.delete("/{task_id}", response_model=dict)

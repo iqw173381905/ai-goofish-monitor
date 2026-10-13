@@ -37,10 +37,29 @@ export function useTaskNotifier() {
   const prevRunning = new Map<number, boolean>()
   // 记录每个任务本轮开始运行的时间（ISO），用于只统计本轮新增的推荐
   const runStartAt = new Map<number, string>()
-  // 记录每个任务本轮已通知过的推荐数量，避免重复弹窗
-  const notifiedCount = new Map<number, number>()
+  // 记录已通知过的商品 ID（持久化到 localStorage，页面刷新/多标签页也不会重复弹窗）
+  // key: `notified_${taskId}`, value: JSON 数组
+  const NOTIFIED_PREFIX = 'monitor_notified_items_'
   let timer: number | null = null
   let started = false
+
+  function getNotifiedIds(taskId: number): Set<string> {
+    try {
+      const raw = localStorage.getItem(NOTIFIED_PREFIX + taskId)
+      if (raw) return new Set(JSON.parse(raw) as string[])
+    } catch { /* ignore */ }
+    return new Set()
+  }
+
+  function addNotifiedIds(taskId: number, ids: string[]) {
+    try {
+      const set = getNotifiedIds(taskId)
+      ids.forEach(id => set.add(id))
+      // 只保留最近 500 个，防止无限增长
+      const arr = [...set].slice(-500)
+      localStorage.setItem(NOTIFIED_PREFIX + taskId, JSON.stringify(arr))
+    } catch { /* ignore */ }
+  }
 
   function notifyRecommended(task: Task, newCount: number) {
     if (!isBrowserNotifyEnabled()) return
@@ -59,15 +78,15 @@ export function useTaskNotifier() {
     }
   }
 
-  async function getRecommendedCountSince(taskId: number, since: string): Promise<number> {
+  async function getRecommendedSince(taskId: number, since: string): Promise<{id: string, title: string}[]> {
     try {
       const res = (await http(
         `/api/tasks/${taskId}/recommended-since?since=${encodeURIComponent(since)}`
-      )) as { count: number }
-      return typeof res.count === 'number' ? res.count : 0
+      )) as { items: {id: string, title: string}[] }
+      return Array.isArray(res.items) ? res.items : []
     } catch {
       // 查询失败时保守处理：不弹窗（避免误报），静默跳过
-      return 0
+      return []
     }
   }
 
@@ -78,26 +97,25 @@ export function useTaskNotifier() {
         const wasRunning = prevRunning.get(task.id)
         const nowRunning = !!task.is_running
         if (wasRunning !== true && nowRunning === true) {
-          // 任务刚开始运行：记录开始时间，重置已通知计数
+          // 任务刚开始运行：记录开始时间
           runStartAt.set(task.id, new Date().toISOString())
-          notifiedCount.set(task.id, 0)
         }
         if (nowRunning === true) {
-          // 任务运行中：实时检测本轮新增推荐，有新增立即弹窗（不等整轮结束）
+          // 任务运行中：实时检测本轮新增推荐，按商品 ID 去重后弹窗
           const since = runStartAt.get(task.id)
           if (since) {
-            const total = await getRecommendedCountSince(task.id, since)
-            const already = notifiedCount.get(task.id) ?? 0
-            if (total > already) {
-              notifyRecommended(task, total - already)
-              notifiedCount.set(task.id, total)
+            const items = await getRecommendedSince(task.id, since)
+            const notified = getNotifiedIds(task.id)
+            const fresh = items.filter(it => it.id && !notified.has(it.id))
+            if (fresh.length > 0) {
+              notifyRecommended(task, fresh.length)
+              addNotifiedIds(task.id, fresh.map(it => it.id))
             }
           }
         }
         if (wasRunning === true && nowRunning === false) {
-          // 任务运行结束：清理本轮记录（推荐已在运行中实时通知过）
+          // 任务运行结束：清理本轮开始时间（已通知 ID 保留在 localStorage 中防重复）
           runStartAt.delete(task.id)
-          notifiedCount.delete(task.id)
         }
         prevRunning.set(task.id, nowRunning)
       }
@@ -107,7 +125,7 @@ export function useTaskNotifier() {
         if (!aliveIds.has(id)) {
           prevRunning.delete(id)
           runStartAt.delete(id)
-          notifiedCount.delete(id)
+          try { localStorage.removeItem(NOTIFIED_PREFIX + id) } catch { /* ignore */ }
         }
       }
     } catch {
