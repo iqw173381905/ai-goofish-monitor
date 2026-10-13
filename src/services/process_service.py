@@ -67,6 +67,100 @@ class ProcessService:
         process = self.processes.get(task_id)
         return process is not None and process.returncode is None
 
+    async def _ensure_login_fresh(self, task_name: str) -> bool:
+        """任务启动前确保闲鱼登录态有效。
+
+        流程：
+        1. 检测 token 是否临期/过期（check_state_file_login_valid）
+        2. 有效 → 直接返回 True
+        3. 临期 → 自动跑 refresh_login.py --auto-only --headless 续期
+        4. 续期成功 → 返回 True；失败 → 通知用户手动更新，返回 False
+        """
+        from src.scraper import check_state_file_login_valid, resolve_effective_state_path
+        from src.infrastructure.persistence.sqlite_task_repository import find_task_by_name_sync
+
+        # 解析任务的登录态文件
+        try:
+            task = find_task_by_name_sync(task_name)
+            task_config = {"account_state_file": task.account_state_file if task else None}
+            state_path = resolve_effective_state_path(task_config)
+        except Exception:
+            state_path = STATE_FILE if os.path.exists(STATE_FILE) else None
+
+        if not state_path:
+            print(f"[登录续期] 任务 '{task_name}' 未找到登录态文件，跳过续期检查")
+            return True
+
+        # 检测 token 有效性（600秒缓冲：临期也触发续期）
+        try:
+            valid, msg = check_state_file_login_valid(state_path, buffer_seconds=600)
+        except Exception as e:
+            print(f"[登录续期] 检测登录态失败: {e}")
+            return True  # 检测失败不阻塞任务启动
+
+        if valid:
+            return True
+
+        print(f"[登录续期] 任务 '{task_name}' 登录态临期/过期: {msg}")
+        print(f"[登录续期] 自动触发 token 续期...")
+
+        # 自动续期：只做 token 轮换，不弹扫码（会话彻底失效时退出码 2）
+        script = os.path.join(os.getcwd(), "refresh_login.py")
+        if not os.path.exists(script):
+            print(f"[登录续期] 续期脚本不存在: {script}")
+            await self._notify_login_expired(task_name, msg)
+            return False
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, script, "--auto-only", "--headless",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=180)
+            except asyncio.TimeoutError:
+                proc.kill()
+                print(f"[登录续期] 续期超时（180秒），终止")
+                await self._notify_login_expired(task_name, "自动续期超时")
+                return False
+
+            output = stdout.decode("utf-8", errors="ignore") if stdout else ""
+            # 输出最后几行到日志
+            for line in output.strip().split("\n")[-5:]:
+                if line.strip():
+                    print(f"[登录续期] {line.strip()}")
+
+            if proc.returncode == 0:
+                print(f"[登录续期] 任务 '{task_name}' token 续期成功")
+                return True
+            elif proc.returncode == 2:
+                print(f"[登录续期] 会话已彻底失效，需要人工扫码登录")
+            else:
+                print(f"[登录续期] 续期失败（退出码 {proc.returncode}）")
+            await self._notify_login_expired(task_name, msg)
+            return False
+        except Exception as e:
+            print(f"[登录续期] 执行续期脚本异常: {e}")
+            await self._notify_login_expired(task_name, msg)
+            return False
+
+    async def _notify_login_expired(self, task_name: str, reason: str) -> None:
+        """登录失效通知用户手动更新"""
+        print(f"[登录续期] 任务 '{task_name}' 无法自动续期，请到『设置 → 账号管理』手动重新登录")
+        try:
+            await send_ntfy_notification(
+                {
+                    "商品标题": f"[登录失效] {task_name}",
+                    "当前售价": "N/A",
+                    "商品链接": "#",
+                },
+                f"闲鱼登录态已失效，自动续期失败。\n原因: {reason}\n"
+                f"请到『设置 → 账号管理』页面重新扫码登录后，再手动启动任务。\n",
+            )
+        except Exception as e:
+            print(f"[登录续期] 发送通知失败: {e}")
+
     async def _drain_finished_process(self, task_id: int) -> None:
         process = self.processes.get(task_id)
         if process is None or process.returncode is None:
@@ -143,6 +237,10 @@ class ProcessService:
         )
         if decision.skip:
             await self._notify_skip(task_name, decision)
+            return False
+
+        # 任务启动前检测登录态 token 是否临期，临期则自动续期
+        if not await self._ensure_login_fresh(task_name):
             return False
 
         log_file_path = ""

@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 import time
@@ -167,12 +168,14 @@ def main() -> None:
     cred = load_credentials()
     username = cred.get("username", "").strip()
     password = cred.get("password", "")
+    auto_only = os.environ.get("REFRESH_AUTO_ONLY") == "1"
+    headless = os.environ.get("REFRESH_HEADLESS") == "1"
 
     with sync_playwright() as p:
         # 持久化上下文：保存登录会话，后续刷新无需重新登录
         ctx = p.chromium.launch_persistent_context(
             str(PROFILE_DIR),
-            headless=False,
+            headless=headless,
             viewport={"width": 1280, "height": 800},
             locale="zh-CN",
             user_agent=(
@@ -181,6 +184,33 @@ def main() -> None:
             ),
         )
         page = ctx.new_page()
+
+        # ---------- 0. 从 state 文件注入已有 cookie（服务器无持久化 profile 时用）----------
+        # launch_persistent_context 的 PROFILE_DIR 在服务器上可能不存在，
+        # 此时从 acc_1.json 加载 cookie，保证 token 轮换能基于有效会话进行
+        if not has_xianyu_session(ctx) and STATE_FILE.exists():
+            try:
+                with open(STATE_FILE, "r", encoding="utf-8") as _f:
+                    _state = json.load(_f)
+                _cookies = _state.get("cookies") or []
+                # Playwright add_cookies 需要的字段格式
+                _inject = []
+                for _c in _cookies:
+                    _inject.append({
+                        "name": _c.get("name"),
+                        "value": _c.get("value"),
+                        "domain": _c.get("domain"),
+                        "path": _c.get("path", "/"),
+                        "expires": _c.get("expires", -1),
+                        "httpOnly": _c.get("httpOnly", False),
+                        "secure": _c.get("secure", False),
+                        "sameSite": _c.get("sameSite") or "Lax",
+                    })
+                if _inject:
+                    ctx.add_cookies(_inject)
+                    log(f"已从 {STATE_FILE.name} 注入 {len(_inject)} 个 cookies")
+            except Exception as _e:
+                log(f"注入 state cookies 失败（继续）: {_e}")
 
         # ---------- 1. 打开闲鱼首页，触发登录 ----------
         log("打开闲鱼首页...")
@@ -195,6 +225,11 @@ def main() -> None:
         # 若已带闲鱼会话，直接进入 token 刷新阶段
         if has_xianyu_session(ctx):
             log("检测到闲鱼会话已存在，无需重新登录。")
+        elif auto_only:
+            # 自动模式：会话已失效，需要人工扫码，无法自动续期
+            log("自动续期模式：未检测到有效闲鱼会话，需要人工扫码登录，退出。")
+            ctx.close()
+            sys.exit(2)
         else:
             # 触发登录：点击页面登录入口或直接导航到登录页
             login_clicked = False
@@ -365,4 +400,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+    _parser = argparse.ArgumentParser(description="闲鱼登录态续期")
+    _parser.add_argument("--auto-only", action="store_true",
+                         help="仅自动轮换 token：会话有效时直接刷新，不弹登录/扫码；会话失效时直接退出码 2")
+    _parser.add_argument("--headless", action="store_true",
+                         help="无头模式运行（服务器环境）")
+    _args = _parser.parse_args()
+    # 通过环境变量传递给 main()（保持 main 签名不变）
+    if _args.auto_only:
+        os.environ["REFRESH_AUTO_ONLY"] = "1"
+    if _args.headless:
+        os.environ["REFRESH_HEADLESS"] = "1"
     main()

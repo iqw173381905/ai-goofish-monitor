@@ -350,6 +350,44 @@ async def get_task_criteria_content(
         raise HTTPException(status_code=500, detail=error_msg)
 
 
+@router.get("/{task_id}/recommended-since", response_model=dict)
+async def get_recommended_since(
+    task_id: int,
+    since: str,
+    service: TaskService = Depends(get_task_service),
+):
+    """返回任务在指定时间（ISO8601）之后新增的推荐商品数量。
+
+    供前端任务完成通知使用：只有当本轮运行确实发现推荐商品时才弹窗，
+    避免每次任务跑完都打扰用户。
+    """
+    task = await service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务未找到")
+    keyword = (task.keyword or "").strip()
+    if not keyword:
+        return {"task_id": task_id, "count": 0, "since": since}
+    filename = build_result_filename(keyword)
+    try:
+        since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="since 参数格式错误，需为 ISO8601 时间")
+    count = 0
+    try:
+        with sqlite_connection() as conn:
+            # crawl_time 以 datetime.now().isoformat() 写入（如 2026-10-13T16:30:00.123456），
+            # 字符串比较时统一用 ISO 格式前缀匹配
+            row = conn.execute(
+                "SELECT COUNT(*) FROM result_items "
+                "WHERE result_filename = ? AND is_recommended = 1 AND crawl_time >= ?",
+                (filename, since_dt.isoformat()),
+            ).fetchone()
+            count = int(row[0]) if row else 0
+    except Exception as e:
+        print(f"[推荐统计] 查询失败 task={task_id}: {e}")
+    return {"task_id": task_id, "count": count, "since": since}
+
+
 @router.delete("/{task_id}", response_model=dict)
 async def delete_task(
     task_id: int,
@@ -387,6 +425,30 @@ async def delete_task(
             os.remove(log_file_path)
     except Exception as e:
         print(f"删除任务日志文件时出错: {e}")
+
+    # 删除任务的 AI 分析标准文件（无其他任务引用时才删，避免误删共享文件；
+    # 系统保留文件 base_prompt.txt / macbook_criteria.txt 永不删除）
+    try:
+        criteria_file = (getattr(task, "ai_prompt_criteria_file", "") or "").strip()
+        _protected = {"prompts/base_prompt.txt", "prompts/macbook_criteria.txt",
+                      "base_prompt.txt", "macbook_criteria.txt"}
+        if criteria_file and criteria_file not in _protected:
+            remaining_tasks = await service.get_all_tasks()
+            still_in_use = any(
+                ((getattr(t, "ai_prompt_criteria_file", "") or "").strip() == criteria_file)
+                for t in remaining_tasks
+            )
+            if not still_in_use:
+                path = criteria_file if os.path.isabs(criteria_file) else os.path.join(os.getcwd(), criteria_file)
+                # 安全检查：只允许删除 prompts 目录下的 _criteria.txt 文件
+                abs_path = os.path.abspath(path)
+                prompts_dir = os.path.abspath(os.path.join(os.getcwd(), "prompts"))
+                if abs_path.startswith(prompts_dir + os.sep) and abs_path.endswith("_criteria.txt") and os.path.exists(abs_path):
+                    os.remove(abs_path)
+                    print(f"[删除任务] 已同步删除 AI 标准文件: {criteria_file}")
+    except Exception as e:
+        print(f"删除任务 AI 标准文件时出错: {e}")
+
     return {"message": "任务删除成功"}
 @router.post("/start/{task_id}", response_model=dict)
 async def start_task(
