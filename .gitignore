@@ -15,3 +15,7 @@ config.json
 price_history/
 data/
 watchdog.log
+
+# 用户任务的 criteria 不入库（本地保留，git 只留 base_prompt + macbook 示例）
+prompts/*_criteria.txt
+!prompts/macbook_criteria.txt
