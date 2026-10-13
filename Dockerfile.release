@@ -27,6 +27,9 @@ COPY prompts /app/prompts
 COPY static /app/static
 COPY config.json.example /app/config.json.example
 
+# 安装 headless shell（refresh_login.py --headless 自动续期需要）
+RUN playwright install chromium-headless-shell
+
 EXPOSE 8000
 
 CMD ["python", "-m", "src.app"]
