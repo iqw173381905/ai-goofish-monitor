@@ -153,12 +153,13 @@ const orderedProfiles = computed(() => {
   return [active as AiProfile, ...sorted]
 })
 
-async function handleToggleProfileFailover(profile: AiProfile) {
+async function handleToggleProfileFailover(profile: AiProfile, value: boolean) {
   try {
-    await updateAiProfile(profile.id, { enabled: !profile.enabled })
+    await updateAiProfile(profile.id, { enabled: value })
     await loadAiProfiles()
   } catch (e) {
     notifyError(t('settings.ai.failoverToggleFailed'), (e as Error).message)
+    await loadAiProfiles()
   }
 }
 
@@ -453,7 +454,7 @@ watch(selectedPrompt, async (value) => {
                         <div class="truncate text-xs text-gray-500">{{ p.model_name }}</div>
                       </div>
                       <span class="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">
-                        <Switch :checked="p.enabled" @update:checked="() => handleToggleProfileFailover(p)" />
+                        <Switch :model-value="p.enabled" @update:model-value="(v) => handleToggleProfileFailover(p, v as boolean)" />
                         {{ t('settings.ai.failoverParticipate') }}
                       </span>
                       <Button variant="outline" size="sm" :disabled="!canMoveProfile(idx, -1)" @click="handleMoveProfile(idx, -1)">
@@ -543,7 +544,7 @@ watch(selectedPrompt, async (value) => {
                   <Label>{{ t('settings.ai.failoverSwitch') }}</Label>
                   <p class="mt-1 text-xs text-gray-500">{{ t('settings.ai.failoverSwitchHint') }}</p>
                 </div>
-                <Switch v-model:checked="aiSettings.AI_FAILOVER_ENABLED" />
+                <Switch v-model="aiSettings.AI_FAILOVER_ENABLED" />
               </div>
             </CardContent>
             <CardContent v-else class="py-8 text-sm text-gray-500">
