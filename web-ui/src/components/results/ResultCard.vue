@@ -149,7 +149,7 @@ const expanded = ref(false)
         
         <button
           type="button"
-          v-if="ai?.reason && ai.reason.length > 50"
+          v-if="ai?.reason"
           @click="expanded = !expanded" 
           class="mt-1 text-[10px] font-bold uppercase text-primary/70 hover:text-primary transition-colors flex items-center gap-1"
         >
