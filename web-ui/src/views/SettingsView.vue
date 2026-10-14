@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useSettings } from '@/composables/useSettings'
 import type { NotificationSettingsUpdate, NotificationTestResponse, AiProfile, AiProfilePayload } from '@/api/settings'
-import { getAiProfiles, createAiProfile, deleteAiProfile, applyAiProfile, getAiSettings, getSystemStatus } from '@/api/settings'
+import { getAiProfiles, createAiProfile, updateAiProfile, deleteAiProfile, applyAiProfile, updateAiProfileFailoverOrder, getAiSettings, getSystemStatus } from '@/api/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { getPromptContent, listPrompts, updatePrompt } from '@/api/prompts'
@@ -127,6 +128,36 @@ async function handleDeleteProfile() {
     notifyError(t('settings.ai.deleteFailed'), (e as Error).message)
   } finally {
     isProfileDeleting.value = false
+  }
+}
+
+// ---- AI 故障转移 ----
+const failoverList = computed(() =>
+  [...aiProfiles.value].sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.id - b.id)
+)
+
+async function handleToggleProfileFailover(profile: AiProfile) {
+  try {
+    await updateAiProfile(profile.id, { enabled: !profile.enabled })
+    await loadAiProfiles()
+  } catch (e) {
+    notifyError(t('settings.ai.failoverToggleFailed'), (e as Error).message)
+  }
+}
+
+async function handleMoveProfile(index: number, direction: -1 | 1) {
+  const list = failoverList.value
+  const target = index + direction
+  if (target < 0 || target >= list.length) return
+  const ids = list.map(p => p.id)
+  const moving = ids.splice(index, 1)[0] as number
+  ids.splice(target, 0, moving)
+  try {
+    await updateAiProfileFailoverOrder(ids)
+    await loadAiProfiles()
+    notifySuccess(t('settings.ai.failoverOrderSaved'))
+  } catch (e) {
+    notifyError(t('settings.ai.failoverOrderFailed'), (e as Error).message)
   }
 }
 
@@ -341,6 +372,30 @@ watch(selectedPrompt, async (value) => {
                     {{ t('settings.ai.delete') }}
                   </Button>
                 </div>
+                <div class="mt-2 border-t pt-4">
+                  <Label class="text-sm font-medium">{{ t('settings.ai.failoverChainTitle') }}</Label>
+                  <p class="mt-1 mb-3 text-xs text-gray-500">{{ t('settings.ai.failoverChainHint') }}</p>
+                  <div v-if="failoverList.length === 0" class="text-sm text-gray-500">{{ t('settings.ai.emptyProfiles') }}</div>
+                  <ul v-else class="space-y-2">
+                    <li v-for="(p, idx) in failoverList" :key="p.id" class="flex items-center gap-2 rounded-lg border px-3 py-2">
+                      <span class="w-6 shrink-0 text-center text-xs font-bold text-gray-400">{{ idx + 1 }}</span>
+                      <div class="min-w-0 flex-1">
+                        <div class="truncate text-sm font-medium">{{ p.name }}</div>
+                        <div class="truncate text-xs text-gray-500">{{ p.model_name }}</div>
+                      </div>
+                      <span class="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">
+                        <Switch :checked="p.enabled" @update:checked="() => handleToggleProfileFailover(p)" />
+                        {{ t('settings.ai.failoverParticipate') }}
+                      </span>
+                      <Button variant="outline" size="sm" :disabled="idx === 0" @click="handleMoveProfile(idx, -1)">
+                        {{ t('settings.ai.moveUp') }}
+                      </Button>
+                      <Button variant="outline" size="sm" :disabled="idx === failoverList.length - 1" @click="handleMoveProfile(idx, 1)">
+                        {{ t('settings.ai.moveDown') }}
+                      </Button>
+                    </li>
+                  </ul>
+                </div>
               </template>
             </CardContent>
             <CardFooter>
@@ -413,6 +468,13 @@ watch(selectedPrompt, async (value) => {
               <div class="grid gap-2">
                 <Label>{{ t('settings.ai.proxy') }}</Label>
                 <Input v-model="aiSettings.PROXY_URL" placeholder="http://127.0.0.1:7890" />
+              </div>
+              <div class="flex items-start justify-between gap-3 rounded-lg border p-3">
+                <div>
+                  <Label>{{ t('settings.ai.failoverSwitch') }}</Label>
+                  <p class="mt-1 text-xs text-gray-500">{{ t('settings.ai.failoverSwitchHint') }}</p>
+                </div>
+                <Switch v-model:checked="aiSettings.AI_FAILOVER_ENABLED" />
               </div>
             </CardContent>
             <CardContent v-else class="py-8 text-sm text-gray-500">

@@ -2,7 +2,7 @@
 设置管理路由
 """
 import os
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +19,9 @@ from src.infrastructure.persistence.sqlite_ai_profile_repository import (
     create_ai_profile,
     delete_ai_profile,
     get_ai_profile,
+    get_failover_profiles,
     list_ai_profiles,
+    set_ai_profile_failover_order,
     update_ai_profile,
 )
 from src.services.ai_request_compat import (
@@ -113,6 +115,7 @@ class AISettingsModel(BaseModel):
     OPENAI_MODEL_NAME: Optional[str] = None
     SKIP_AI_ANALYSIS: Optional[bool] = None
     PROXY_URL: Optional[str] = None
+    AI_FAILOVER_ENABLED: Optional[bool] = None
 
 
 class AIProfileCreateModel(BaseModel):
@@ -123,6 +126,8 @@ class AIProfileCreateModel(BaseModel):
     api_key: str = Field(min_length=1)
     model_name: str = Field(min_length=1)
     proxy_url: Optional[str] = None
+    enabled: Optional[bool] = None
+    priority: Optional[int] = None
 
 
 class AIProfileUpdateModel(BaseModel):
@@ -133,6 +138,8 @@ class AIProfileUpdateModel(BaseModel):
     api_key: Optional[str] = Field(default=None, min_length=1)
     model_name: Optional[str] = Field(default=None, min_length=1)
     proxy_url: Optional[str] = None
+    enabled: Optional[bool] = None
+    priority: Optional[int] = None
 
 
 class RotationSettingsModel(BaseModel):
@@ -288,6 +295,7 @@ async def get_ai_settings():
         "OPENAI_MODEL_NAME": env_manager.get_value("OPENAI_MODEL_NAME", ""),
         "SKIP_AI_ANALYSIS": env_manager.get_value("SKIP_AI_ANALYSIS", "false").lower() == "true",
         "PROXY_URL": env_manager.get_value("PROXY_URL", ""),
+        "AI_FAILOVER_ENABLED": env_manager.get_value("AI_FAILOVER_ENABLED", "true").lower() == "true",
     }
 
 
@@ -304,6 +312,8 @@ async def update_ai_settings(settings: AISettingsModel):
         updates["SKIP_AI_ANALYSIS"] = str(settings.SKIP_AI_ANALYSIS).lower()
     if settings.PROXY_URL is not None:
         updates["PROXY_URL"] = settings.PROXY_URL
+    if settings.AI_FAILOVER_ENABLED is not None:
+        updates["AI_FAILOVER_ENABLED"] = str(settings.AI_FAILOVER_ENABLED).lower()
 
     success = env_manager.update_values(updates)
     if not success:
@@ -393,6 +403,8 @@ def _profile_public(profile: dict) -> dict:
         "api_key_masked": _mask_api_key(profile.get("api_key") or ""),
         "model_name": profile["model_name"],
         "proxy_url": profile.get("proxy_url") or "",
+        "enabled": bool(profile.get("enabled", True)),
+        "priority": int(profile.get("priority", 0) or 0),
         "created_at": profile.get("created_at"),
         "updated_at": profile.get("updated_at"),
     }
@@ -413,6 +425,8 @@ async def add_ai_profile(payload: AIProfileCreateModel):
             api_key=payload.api_key,
             model_name=payload.model_name,
             proxy_url=payload.proxy_url,
+            enabled=payload.enabled if payload.enabled is not None else True,
+            priority=payload.priority or 0,
         )
     except Exception as exc:
         if "UNIQUE" in str(exc).upper():
@@ -432,6 +446,8 @@ async def edit_ai_profile(profile_id: int, payload: AIProfileUpdateModel):
         api_key=payload.api_key,
         model_name=payload.model_name,
         proxy_url=payload.proxy_url,
+        enabled=payload.enabled,
+        priority=payload.priority,
     )
     if profile is None:
         raise HTTPException(status_code=404, detail="模型档案不存在")
@@ -471,3 +487,47 @@ async def apply_ai_profile(profile_id: int):
             "PROXY_URL": env_manager.get_value("PROXY_URL", ""),
         },
     }
+
+
+class AIFailoverOrderModel(BaseModel):
+    """故障转移顺序：ids 越靠前，故障转移时越先尝试。"""
+
+    ids: List[int] = Field(min_length=1)
+
+
+@router.get("/ai/failover-chain")
+async def get_ai_failover_chain():
+    """预览当前故障转移链：主配置 + 启用的备用档案（按 priority 排序）。"""
+    from src.infrastructure.config.settings import AISettings
+
+    settings = AISettings()
+    chain = []
+    if settings.is_configured():
+        chain.append(
+            {
+                "kind": "primary",
+                "id": 0,
+                "name": "主配置",
+                "base_url": settings.base_url,
+                "model_name": settings.model_name,
+                "enabled": True,
+            }
+        )
+    if settings.failover_enabled:
+        for profile in get_failover_profiles():
+            chain.append({"kind": "profile", **_profile_public(profile)})
+    return {
+        "failover_enabled": settings.failover_enabled,
+        "chain": chain,
+    }
+
+
+@router.post("/ai/profiles/failover-order")
+async def set_ai_failover_order(payload: AIFailoverOrderModel):
+    """重设故障转移顺序：ids 越靠前 priority 越大。"""
+    existing_ids = {p["id"] for p in list_ai_profiles()}
+    unknown = [i for i in payload.ids if i not in existing_ids]
+    if unknown:
+        raise HTTPException(status_code=404, detail=f"模型档案不存在: {unknown}")
+    set_ai_profile_failover_order(payload.ids)
+    return {"message": "故障转移顺序已更新"}

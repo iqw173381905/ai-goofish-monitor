@@ -20,6 +20,7 @@ if sys.platform.startswith('win'):
 
 from src.config import (
     AI_DEBUG_MODE,
+    BASE_URL,
     IMAGE_DOWNLOAD_HEADERS,
     IMAGE_SAVE_DIR,
     TASK_IMAGE_DIR_PREFIX,
@@ -431,6 +432,35 @@ def _summarize_product_json(product_data: dict) -> str:
         return json.dumps(product_data, ensure_ascii=False, separators=(",", ":"))
 
 
+def _is_failover_enabled() -> bool:
+    """运行时读取开关：设置页修改后无需重启即生效。"""
+    return os.getenv("AI_FAILOVER_ENABLED", "true").strip().lower() == "true"
+
+
+def _build_failover_chain():
+    """构建 AI 故障转移链：[(显示名, 客户端, 模型名), ...]。
+
+    主配置（当前 .env 生效）永远第一顺位；随后按 priority 轮询所有
+    enabled=1 的模型档案（与主配置相同的档案自动去重）。
+    """
+    if not _is_failover_enabled():
+        return [(f"主配置（{MODEL_NAME}）", client, MODEL_NAME)] if client else []
+    try:
+        from src.services.ai_failover import load_failover_chain
+
+        chain = load_failover_chain(
+            primary_label=f"主配置（{MODEL_NAME}）",
+            primary_client=client,
+            primary_base_url=BASE_URL or "",
+            primary_model_name=MODEL_NAME or "",
+        )
+        if chain:
+            return chain
+    except Exception as e:
+        safe_print(f"   [AI分析] 读取备用模型档案失败，仅使用主配置: {e}")
+    return [(f"主配置（{MODEL_NAME}）", client, MODEL_NAME)] if client else []
+
+
 async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_urls=None):
     """将完整的商品JSON数据和所有图片发送给 AI 进行分析（异步）。
 
@@ -522,131 +552,160 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
     except Exception as e:
         safe_print(f"   [日志] 保存AI分析日志时出错: {e}")
 
-    # 增强的AI调用，包含更严格的结构化输出控制和重试机制
-    max_retries = 4
-    api_mode = CHAT_COMPLETIONS_API_MODE
-    use_response_format = ENABLE_RESPONSE_FORMAT
-    use_temperature = True
-    for attempt in range(max_retries):
-        if attempt > 0:
-            # 重试间隔：给中转站/上游喘息时间，避免连续重试全部撞在同一波故障
-            await asyncio.sleep(min(2 + attempt * 2, 8))
-        try:
-            # 根据重试次数调整参数
-            current_temperature = 0.1 if attempt == 0 else 0.05  # 重试时使用更低的温度
-            # 第 2 次起去掉 response_format：部分中转站对该参数不稳定（有时返回空），
-            # 两种参数都试一遍，提高命中成功率
-            if attempt >= 1:
-                use_response_format = False
-            # 第 3 次起降低输出长度限制，减轻生成压力
-            max_output_tokens = 1200 if attempt < 2 else 600
+    async def _analyze_with_single_model(ai_client, model_name, model_label):
+        """单个模型的增强 AI 调用（含多次重试与参数自适应）。
 
-            from src.config import get_ai_request_params
-
-            request_params = build_ai_request_params(
-                api_mode,
-                model=MODEL_NAME,
-                messages=messages,
-                temperature=current_temperature,
-                max_output_tokens=max_output_tokens,
-                enable_json_output=use_response_format,
-            )
-            if not use_temperature:
-                request_params = remove_temperature_param(request_params)
-
-            request_params = get_ai_request_params(**request_params)
-
-            if AI_DEBUG_MODE:
-                safe_print(f"\n--- [AI DEBUG] 第{attempt + 1}次尝试 REQUEST ---")
-                safe_print(
-                    json.dumps(
-                        _build_debug_request_summary(api_mode, request_params),
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-                )
-                safe_print("-----------------------------------\n")
-
-            response = await create_ai_response_async(
-                client,
-                api_mode,
-                request_params,
-            )
-            ai_response_content = extract_ai_response_content(response)
-
-            if AI_DEBUG_MODE:
-                safe_print(f"\n--- [AI DEBUG] 第{attempt + 1}次尝试 ---")
-                safe_print("--- RAW AI RESPONSE ---")
-                safe_print(ai_response_content)
-                safe_print("---------------------\n")
-
+        成功返回解析后的响应字典；全部失败时抛出最后一个异常。
+        """
+        # 增强的AI调用，包含更严格的结构化输出控制和重试机制
+        max_retries = 4
+        api_mode = CHAT_COMPLETIONS_API_MODE
+        use_response_format = ENABLE_RESPONSE_FORMAT
+        use_temperature = True
+        for attempt in range(max_retries):
+            if attempt > 0:
+                # 重试间隔：给中转站/上游喘息时间，避免连续重试全部撞在同一波故障
+                await asyncio.sleep(min(2 + attempt * 2, 8))
             try:
-                parsed_response = parse_ai_response_json(ai_response_content)
-
-                # 验证响应格式
-                if validate_ai_response_format(parsed_response):
-                    # value_score 兜底：模型未输出价值分时，依据 is_recommended 与
-                    # criteria_analysis 各维度状态推算，避免前端显示 AI MATCH 0%
-                    # 与推荐结论互相矛盾
-                    if parsed_response.get("value_score") is None:
-                        parsed_response["value_score"] = _compute_fallback_value_score(
-                            parsed_response
-                        )
-                    safe_print(f"   [AI分析] 第{attempt + 1}次尝试成功，响应格式验证通过")
-                    return parsed_response
-                safe_print(f"   [AI分析] 第{attempt + 1}次尝试格式验证失败")
-                if attempt < max_retries - 1:
-                    safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
-                    continue
-                raise ValueError("AI响应格式缺少必需字段或字段类型不正确。")
-            except json.JSONDecodeError as e:
-                safe_print(f"   [AI分析] 第{attempt + 1}次尝试JSON解析失败: {e}")
-                if attempt < max_retries - 1:
-                    safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
-                    continue
-                raise e
-            except EmptyAIResponseError as e:
-                safe_print(f"   [AI分析] 第{attempt + 1}次尝试返回空响应: {e}")
-                if attempt >= 1 and use_response_format:
+                # 根据重试次数调整参数
+                current_temperature = 0.1 if attempt == 0 else 0.05  # 重试时使用更低的温度
+                # 第 2 次起去掉 response_format：部分中转站对该参数不稳定（有时返回空），
+                # 两种参数都试一遍，提高命中成功率
+                if attempt >= 1:
                     use_response_format = False
-                    safe_print("   [AI分析] 空响应，后续重试将禁用 response_format 参数。")
+                # 第 3 次起降低输出长度限制，减轻生成压力
+                max_output_tokens = 1200 if attempt < 2 else 600
+
+                from src.config import get_ai_request_params
+
+                request_params = build_ai_request_params(
+                    api_mode,
+                    model=model_name,
+                    messages=messages,
+                    temperature=current_temperature,
+                    max_output_tokens=max_output_tokens,
+                    enable_json_output=use_response_format,
+                )
+                if not use_temperature:
+                    request_params = remove_temperature_param(request_params)
+
+                request_params = get_ai_request_params(**request_params)
+
+                if AI_DEBUG_MODE:
+                    safe_print(f"\n--- [AI DEBUG] 第{attempt + 1}次尝试 REQUEST ---")
+                    safe_print(
+                        json.dumps(
+                            _build_debug_request_summary(api_mode, request_params),
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                    safe_print("-----------------------------------\n")
+
+                response = await create_ai_response_async(
+                    ai_client,
+                    api_mode,
+                    request_params,
+                )
+                ai_response_content = extract_ai_response_content(response)
+
+                if AI_DEBUG_MODE:
+                    safe_print(f"\n--- [AI DEBUG] 第{attempt + 1}次尝试 ---")
+                    safe_print("--- RAW AI RESPONSE ---")
+                    safe_print(ai_response_content)
+                    safe_print("---------------------\n")
+
+                try:
+                    parsed_response = parse_ai_response_json(ai_response_content)
+
+                    # 验证响应格式
+                    if validate_ai_response_format(parsed_response):
+                        # value_score 兜底：模型未输出价值分时，依据 is_recommended 与
+                        # criteria_analysis 各维度状态推算，避免前端显示 AI MATCH 0%
+                        # 与推荐结论互相矛盾
+                        if parsed_response.get("value_score") is None:
+                            parsed_response["value_score"] = _compute_fallback_value_score(
+                                parsed_response
+                            )
+                        safe_print(f"   [AI分析] 第{attempt + 1}次尝试成功，响应格式验证通过")
+                        return parsed_response
+                    safe_print(f"   [AI分析] 第{attempt + 1}次尝试格式验证失败")
+                    if attempt < max_retries - 1:
+                        safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
+                        continue
+                    raise ValueError("AI响应格式缺少必需字段或字段类型不正确。")
+                except json.JSONDecodeError as e:
+                    safe_print(f"   [AI分析] 第{attempt + 1}次尝试JSON解析失败: {e}")
+                    if attempt < max_retries - 1:
+                        safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
+                        continue
+                    raise e
+                except EmptyAIResponseError as e:
+                    safe_print(f"   [AI分析] 第{attempt + 1}次尝试返回空响应: {e}")
+                    if attempt >= 1 and use_response_format:
+                        use_response_format = False
+                        safe_print("   [AI分析] 空响应，后续重试将禁用 response_format 参数。")
+                    if attempt < max_retries - 1:
+                        safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
+                        continue
+                    raise e
+
+            except Exception as e:
+                if (
+                    api_mode == CHAT_COMPLETIONS_API_MODE
+                    and is_chat_completions_api_unsupported_error(e)
+                ):
+                    api_mode = RESPONSES_API_MODE
+                    safe_print(
+                        "   [AI分析] 当前服务未实现 Chat Completions API，后续重试将自动回退到 Responses API。"
+                    )
+                elif api_mode == RESPONSES_API_MODE and is_responses_api_unsupported_error(e):
+                    api_mode = CHAT_COMPLETIONS_API_MODE
+                    safe_print(
+                        "   [AI分析] 当前服务未实现 Responses API，后续重试将自动回退到 Chat Completions API。"
+                    )
+                if use_response_format and is_json_output_unsupported_error(e):
+                    use_response_format = False
+                    safe_print(
+                        "   [AI分析] 当前模型不支持结构化 JSON 输出，后续重试将自动禁用该参数。"
+                    )
+                if use_temperature and is_temperature_unsupported_error(e):
+                    use_temperature = False
+                    safe_print(
+                        "   [AI分析] 当前模型不支持 temperature 参数，后续重试将自动禁用该参数。"
+                    )
+                if AI_DEBUG_MODE:
+                    safe_print(f"\n--- [AI DEBUG] 第{attempt + 1}次尝试 EXCEPTION ---")
+                    safe_print(repr(e))
+                    safe_print(traceback.format_exc())
+                    safe_print("-------------------------------------\n")
+                safe_print(f"   [AI分析] 「{model_label}」第{attempt + 1}次尝试AI调用失败: {e}")
                 if attempt < max_retries - 1:
                     safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
                     continue
-                raise e
+                else:
+                    raise e
 
+
+    # ---- 故障转移：主配置失败后自动轮询启用的备用模型档案 ----
+    model_chain = _build_failover_chain()
+    if len(model_chain) > 1:
+        chain_desc = " -> ".join(label for label, _, _ in model_chain)
+        safe_print(f"   [AI分析] 故障转移链（{len(model_chain)} 个模型）: {chain_desc}")
+    last_error = None
+    for chain_index, (model_label, ai_client, model_name) in enumerate(model_chain):
+        if chain_index > 0:
+            safe_print(f"   [AI分析] 上一个模型失败，切换到备用模型「{model_label}」...")
+        try:
+            parsed_response = await _analyze_with_single_model(ai_client, model_name, model_label)
         except Exception as e:
-            if (
-                api_mode == CHAT_COMPLETIONS_API_MODE
-                and is_chat_completions_api_unsupported_error(e)
-            ):
-                api_mode = RESPONSES_API_MODE
-                safe_print(
-                    "   [AI分析] 当前服务未实现 Chat Completions API，后续重试将自动回退到 Responses API。"
-                )
-            elif api_mode == RESPONSES_API_MODE and is_responses_api_unsupported_error(e):
-                api_mode = CHAT_COMPLETIONS_API_MODE
-                safe_print(
-                    "   [AI分析] 当前服务未实现 Responses API，后续重试将自动回退到 Chat Completions API。"
-                )
-            if use_response_format and is_json_output_unsupported_error(e):
-                use_response_format = False
-                safe_print(
-                    "   [AI分析] 当前模型不支持结构化 JSON 输出，后续重试将自动禁用该参数。"
-                )
-            if use_temperature and is_temperature_unsupported_error(e):
-                use_temperature = False
-                safe_print(
-                    "   [AI分析] 当前模型不支持 temperature 参数，后续重试将自动禁用该参数。"
-                )
-            if AI_DEBUG_MODE:
-                safe_print(f"\n--- [AI DEBUG] 第{attempt + 1}次尝试 EXCEPTION ---")
-                safe_print(repr(e))
-                safe_print(traceback.format_exc())
-                safe_print("-------------------------------------\n")
-            safe_print(f"   [AI分析] 第{attempt + 1}次尝试AI调用失败: {e}")
-            if attempt < max_retries - 1:
-                safe_print(f"   [AI分析] 准备第{attempt + 2}次重试...")
-                continue
-            else:
-                raise e
+            last_error = e
+            safe_print(f"   [AI分析] 模型「{model_label}」全部尝试失败，继续下一个模型: {e}")
+            continue
+        parsed_response["model_used"] = model_label
+        if chain_index > 0:
+            safe_print(f"   [AI分析] 备用模型「{model_label}」分析成功")
+        return parsed_response
+    if last_error is not None:
+        raise last_error
+    return None

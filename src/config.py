@@ -51,6 +51,7 @@ AI_DEBUG_MODE = os.getenv("AI_DEBUG_MODE", "false").lower() == "true"
 SKIP_AI_ANALYSIS = os.getenv("SKIP_AI_ANALYSIS", "false").lower() == "true"
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "false").lower() == "true"
 ENABLE_RESPONSE_FORMAT = os.getenv("ENABLE_RESPONSE_FORMAT", "true").lower() == "true"
+AI_FAILOVER_ENABLED = os.getenv("AI_FAILOVER_ENABLED", "true").lower() == "true"
 
 # "最新发布"筛选的时间窗口（分钟）：任务选择"最新"时，仅保留在此窗口内发布的商品。
 # 闲鱼页面"最新"选项实际是"不限时间、按最新排序"，因此需要抓取后按发布时间后过滤，

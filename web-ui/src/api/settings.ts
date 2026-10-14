@@ -62,6 +62,7 @@ export interface AiSettings {
   OPENAI_BASE_URL?: string
   OPENAI_MODEL_NAME?: string
   PROXY_URL?: string
+  AI_FAILOVER_ENABLED?: boolean
 }
 
 export interface AiProfile {
@@ -71,6 +72,8 @@ export interface AiProfile {
   api_key_masked?: string
   model_name: string
   proxy_url?: string
+  enabled: boolean
+  priority: number
   created_at?: string
   updated_at?: string
 }
@@ -81,6 +84,8 @@ export interface AiProfilePayload {
   api_key: string
   model_name: string
   proxy_url?: string
+  enabled?: boolean
+  priority?: number
 }
 
 export interface AiProfileApplyResponse {
@@ -216,6 +221,28 @@ export async function deleteAiProfile(profileId: number): Promise<{ message: str
 
 export async function applyAiProfile(profileId: number): Promise<AiProfileApplyResponse> {
   return await http(`/api/settings/ai/profiles/${profileId}/apply`, { method: 'POST' })
+}
+
+export async function updateAiProfileFailoverOrder(ids: number[]): Promise<{ message: string }> {
+  return await http('/api/settings/ai/profiles/failover-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids })
+  })
+}
+
+export interface AiFailoverChainItem {
+  kind: 'primary' | 'profile'
+  id: number
+  name: string
+  base_url: string
+  model_name: string
+  enabled: boolean
+  priority?: number
+}
+
+export async function getAiFailoverChain(): Promise<{ failover_enabled: boolean; chain: AiFailoverChainItem[] }> {
+  return await http('/api/settings/ai/failover-chain')
 }
 
 export async function getSystemStatus(): Promise<SystemStatus> {

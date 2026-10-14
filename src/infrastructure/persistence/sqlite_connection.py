@@ -108,6 +108,8 @@ SCHEMA_STATEMENTS = (
         api_key TEXT NOT NULL,
         model_name TEXT NOT NULL,
         proxy_url TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        priority INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )
@@ -161,6 +163,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _migrate_task_keyword_columns(conn)
     _migrate_task_criteria_status(conn)
     _migrate_task_criteria_since(conn)
+    _migrate_ai_profiles_failover(conn)
     conn.commit()
 
 
@@ -241,6 +244,31 @@ def _migrate_task_criteria_since(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN criteria_generating_since TEXT")
     conn.execute(
         "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_criteria_since', 'done')"
+    )
+
+
+def _migrate_ai_profiles_failover(conn: sqlite3.Connection) -> None:
+    """为 ai_profiles 表添加 enabled / priority 列（仅执行一次，兼容旧库）。
+
+    enabled：是否参与 AI 故障转移轮询（1=参与，0=仅手动切换）。
+    priority：数值越大，在故障转移链中越靠前。
+    """
+    row = conn.execute(
+        "SELECT value FROM app_metadata WHERE key = 'migration:ai_profiles_failover'"
+    ).fetchone()
+    if row is not None:
+        return
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(ai_profiles)").fetchall()]
+    if "enabled" not in cols:
+        conn.execute(
+            "ALTER TABLE ai_profiles ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
+        )
+    if "priority" not in cols:
+        conn.execute(
+            "ALTER TABLE ai_profiles ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:ai_profiles_failover', 'done')"
     )
 
 
