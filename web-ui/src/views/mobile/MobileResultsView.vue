@@ -35,20 +35,24 @@ async function loadAll() {
   }
 }
 
+function getInfo(it: any) {
+  return it['商品信息'] || {}
+}
 function itemTitle(it: any) {
-  return it.title || it['商品标题'] || '未知商品'
+  return getInfo(it)['商品标题'] || '未知商品'
 }
 function itemPrice(it: any) {
-  return it.price_display || it['商品价格'] || it.price || ''
+  return getInfo(it)['当前售价'] || ''
 }
 function itemLink(it: any) {
-  return it.link || it['商品链接'] || ''
+  return getInfo(it)['商品链接'] || ''
 }
 function itemImage(it: any) {
-  return it.image || it['商品图片'] || it.cover || ''
+  const info = getInfo(it)
+  return info['商品主图链接'] || (info['商品图片列表'] && info['商品图片列表'][0]) || ''
 }
 function isRecommended(it: any) {
-  return it.is_recommended || it['是否推荐'] === '是'
+  return it.ai_analysis?.is_recommended === true
 }
 
 onMounted(loadAll)
