@@ -302,6 +302,10 @@ const zhCN = {
       failoverOrderSaved: '故障转移顺序已更新',
       failoverOrderFailed: '更新故障转移顺序失败',
       failoverToggleFailed: '更新参与开关失败',
+      saveActiveAsProfile: '将当前配置保存为档案',
+      saveActiveHint: '当前生效的配置还没有保存为档案，点一下即可存档，避免重复手工录入。',
+      saveActivePrompt: '请输入档案名称：',
+      activeProfileDefaultName: '主配置',
     },
     rotation: { saved: '轮换设置已保存', saveFailed: '轮换设置保存失败' },
     status: {

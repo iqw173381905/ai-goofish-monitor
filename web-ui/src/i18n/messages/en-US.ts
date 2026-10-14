@@ -302,6 +302,10 @@ const enUS = {
       failoverOrderSaved: 'Failover order updated',
       failoverOrderFailed: 'Failed to update failover order',
       failoverToggleFailed: 'Failed to update toggle',
+      saveActiveAsProfile: 'Save active config as profile',
+      saveActiveHint: 'The active config is not saved as a profile yet. One click saves it, no manual re-entry needed.',
+      saveActivePrompt: 'Profile name:',
+      activeProfileDefaultName: 'Primary',
     },
     rotation: { saved: 'Rotation settings saved.', saveFailed: 'Failed to save rotation settings.' },
     status: {

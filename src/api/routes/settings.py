@@ -530,6 +530,47 @@ async def get_ai_failover_chain():
     }
 
 
+class AIProfileFromActiveModel(BaseModel):
+    """从当前生效配置创建档案。"""
+
+    name: str = Field(min_length=1, max_length=60)
+
+
+@router.post("/ai/profiles/from-active")
+async def create_ai_profile_from_active(payload: AIProfileFromActiveModel):
+    """将当前生效的 AI 配置（.env）保存为一条模型档案，避免重复手工录入。"""
+    from src.infrastructure.config.settings import AISettings
+
+    settings = AISettings()
+    if not settings.is_configured():
+        raise HTTPException(status_code=400, detail="当前没有生效的 AI 配置可保存")
+    base_url = (settings.base_url or "").rstrip("/")
+    model_name = (settings.model_name or "").strip()
+    for existing in list_ai_profiles():
+        if (existing.get("base_url") or "").rstrip("/") == base_url and (
+            existing.get("model_name") or ""
+        ).strip() == model_name:
+            raise HTTPException(
+                status_code=409,
+                detail=f"已存在相同配置的档案「{existing['name']}」，无需重复保存。",
+            )
+    try:
+        profile = create_ai_profile(
+            name=payload.name,
+            base_url=base_url,
+            api_key=settings.api_key or "",
+            model_name=model_name,
+            proxy_url=env_manager.get_value("PROXY_URL", "") or "",
+        )
+    except Exception as exc:
+        if "UNIQUE" in str(exc).upper():
+            raise HTTPException(
+                status_code=409, detail=f"档案名称「{payload.name}」已存在，请换一个名称。"
+            ) from exc
+        raise HTTPException(status_code=500, detail=f"保存模型档案失败: {exc}") from exc
+    return {"message": f"已将当前配置保存为档案「{profile['name']}」", "profile": _profile_public(profile)}
+
+
 @router.post("/ai/profiles/failover-order")
 async def set_ai_failover_order(payload: AIFailoverOrderModel):
     """重设故障转移顺序：ids 越靠前 priority 越大。"""

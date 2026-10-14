@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useSettings } from '@/composables/useSettings'
 import type { NotificationSettingsUpdate, NotificationTestResponse, AiProfile, AiProfilePayload } from '@/api/settings'
-import { getAiProfiles, createAiProfile, updateAiProfile, deleteAiProfile, applyAiProfile, updateAiProfileFailoverOrder, getAiSettings, getSystemStatus } from '@/api/settings'
+import { getAiProfiles, createAiProfile, createAiProfileFromActive, updateAiProfile, deleteAiProfile, applyAiProfile, updateAiProfileFailoverOrder, getAiSettings, getSystemStatus } from '@/api/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toast'
 import { getPromptContent, listPrompts, updatePrompt } from '@/api/prompts'
@@ -142,6 +143,34 @@ async function handleToggleProfileFailover(profile: AiProfile) {
     await loadAiProfiles()
   } catch (e) {
     notifyError(t('settings.ai.failoverToggleFailed'), (e as Error).message)
+  }
+}
+
+const activeProfileId = computed(() => {
+  const baseUrl = (aiSettings.value.OPENAI_BASE_URL || '').replace(/\/$/, '')
+  const modelName = (aiSettings.value.OPENAI_MODEL_NAME || '').trim()
+  if (!baseUrl || !modelName) return null
+  const hit = aiProfiles.value.find(
+    p => (p.base_url || '').replace(/\/$/, '') === baseUrl && (p.model_name || '').trim() === modelName
+  )
+  return hit ? hit.id : null
+})
+
+const isSavingActiveProfile = ref(false)
+
+async function handleSaveActiveAsProfile() {
+  const defaultName = t('settings.ai.activeProfileDefaultName')
+  const name = window.prompt(t('settings.ai.saveActivePrompt'), defaultName)
+  if (!name || !name.trim()) return
+  isSavingActiveProfile.value = true
+  try {
+    const res = await createAiProfileFromActive(name.trim())
+    notifySuccess(res.message || t('settings.ai.profileSaved', { name: name.trim() }))
+    await loadAiProfiles()
+  } catch (e) {
+    notifyError(t('settings.ai.profileSaveFailed'), (e as Error).message)
+  } finally {
+    isSavingActiveProfile.value = false
   }
 }
 
@@ -345,6 +374,12 @@ watch(selectedPrompt, async (value) => {
             <CardHeader>
               <CardTitle>{{ t('settings.ai.profilesTitle') }}</CardTitle>
               <CardDescription>{{ t('settings.ai.profilesDescription') }}</CardDescription>
+              <div v-if="isReady && activeProfileId === null && aiSettings.OPENAI_BASE_URL && aiSettings.OPENAI_MODEL_NAME" class="mt-2">
+                <Button variant="outline" size="sm" :disabled="isSavingActiveProfile" @click="handleSaveActiveAsProfile">
+                  {{ t('settings.ai.saveActiveAsProfile') }}
+                </Button>
+                <p class="mt-1 text-xs text-gray-500">{{ t('settings.ai.saveActiveHint') }}</p>
+              </div>
             </CardHeader>
             <CardContent class="space-y-4">
               <p class="text-xs text-gray-500">{{ t('settings.ai.profileHint') }}</p>
@@ -380,7 +415,10 @@ watch(selectedPrompt, async (value) => {
                     <li v-for="(p, idx) in failoverList" :key="p.id" class="flex items-center gap-2 rounded-lg border px-3 py-2">
                       <span class="w-6 shrink-0 text-center text-xs font-bold text-gray-400">{{ idx + 1 }}</span>
                       <div class="min-w-0 flex-1">
-                        <div class="truncate text-sm font-medium">{{ p.name }}</div>
+                        <div class="flex items-center gap-1.5">
+                          <span class="truncate text-sm font-medium">{{ p.name }}</span>
+                          <Badge v-if="p.id === activeProfileId" variant="secondary" class="shrink-0">{{ t('settings.ai.currentProfile') }}</Badge>
+                        </div>
                         <div class="truncate text-xs text-gray-500">{{ p.model_name }}</div>
                       </div>
                       <span class="flex shrink-0 items-center gap-1.5 text-xs text-gray-500">

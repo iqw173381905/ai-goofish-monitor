@@ -223,6 +223,14 @@ export async function applyAiProfile(profileId: number): Promise<AiProfileApplyR
   return await http(`/api/settings/ai/profiles/${profileId}/apply`, { method: 'POST' })
 }
 
+export async function createAiProfileFromActive(name: string): Promise<{ message: string; profile: AiProfile }> {
+  return await http('/api/settings/ai/profiles/from-active', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  })
+}
+
 export async function updateAiProfileFailoverOrder(ids: number[]): Promise<{ message: string }> {
   return await http('/api/settings/ai/profiles/failover-order', {
     method: 'POST',
