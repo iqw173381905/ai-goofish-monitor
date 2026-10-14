@@ -87,6 +87,14 @@ function itemId(it: any) {
   return getInfo(it)['商品ID'] || ''
 }
 const deletingIdx = ref<number | null>(null)
+const expandedSet = ref<Set<number>>(new Set())
+function aiReason(it: any) {
+  return it.ai_analysis?.reason || ''
+}
+function toggleExpand(idx: number) {
+  if (expandedSet.value.has(idx)) expandedSet.value.delete(idx)
+  else expandedSet.value.add(idx)
+}
 async function handleDelete(it: any, idx: number) {
   const filename = (it as any)._sourceFile
   const id = itemId(it)
@@ -186,6 +194,22 @@ onMounted(loadAll)
               <span v-if="itemRegion(it)" class="text-[11px] text-slate-400">{{ itemRegion(it) }}</span>
               <span v-if="itemCrawlTime(it)" class="text-[11px] text-slate-400">{{ itemCrawlTime(it) }} 抓取</span>
             </div>
+            <div v-if="aiReason(it)" class="mt-2 rounded-xl bg-slate-50 border border-slate-100 p-2.5">
+              <p class="text-[11px] font-black mb-1" :class="isRecommended(it) ? 'text-emerald-600' : 'text-rose-500'">
+                {{ isRecommended(it) ? '✓ 建议购买' : '✕ 不建议购买' }}
+              </p>
+              <p class="text-xs leading-relaxed text-slate-600" :class="{ 'line-clamp-2': !expandedSet.has(idx) }">
+                {{ aiReason(it) }}
+              </p>
+              <button
+                type="button"
+                @click="toggleExpand(idx)"
+                class="mt-1 text-[11px] font-bold text-primary/70 active:text-primary"
+              >
+                {{ expandedSet.has(idx) ? '收起 ▲' : '阅读完整理由 ▼' }}
+              </button>
+            </div>
+            <div v-else class="mt-2 text-[11px] text-slate-300">AI 分析中…</div>
             <div class="flex items-center gap-2 mt-2">
               <a
                 v-if="itemLink(it)"
