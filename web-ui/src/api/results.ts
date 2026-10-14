@@ -27,6 +27,10 @@ export async function deleteResultItem(filename: string, itemId: string): Promis
   return await http(`/api/results/${filename}/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' })
 }
 
+export async function clearAllResults(): Promise<{ message: string; deleted: number }> {
+  return await http('/api/results/files', { method: 'DELETE' })
+}
+
 export async function getResultContent(
   filename: string,
   params: GetResultContentParams = {}

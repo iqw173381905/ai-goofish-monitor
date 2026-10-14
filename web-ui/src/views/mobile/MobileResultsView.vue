@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { RefreshCcw, ExternalLink, Star, Trash2 } from 'lucide-vue-next'
-import { getResultFiles, getResultContent, deleteResultItem } from '@/api/results'
+import { RefreshCcw, ExternalLink, Star, Trash2, Trash } from 'lucide-vue-next'
+import { getResultFiles, getResultContent, deleteResultItem, clearAllResults } from '@/api/results'
 import { formatDateTime } from '@/i18n'
 import { toast } from '@/components/ui/toast'
 import type { ResultItem } from '@/types/result.d.ts'
@@ -35,6 +35,23 @@ async function loadAll() {
       String(b['爬取时间'] || '').localeCompare(String(a['爬取时间'] || '')))
   } finally {
     isLoading.value = false
+  }
+}
+
+const isClearingAll = ref(false)
+async function handleClearAll() {
+  if (isClearingAll.value || items.value.length === 0) return
+  if (!window.confirm(`确定清空全部 ${items.value.length} 条结果吗？此操作不可恢复。`)) return
+  isClearingAll.value = true
+  try {
+    const res = await clearAllResults()
+    items.value = []
+    files.value = []
+    toast({ title: res.message || '已清空' })
+  } catch (e) {
+    toast({ title: '清空失败', description: (e as Error).message, variant: 'destructive' })
+  } finally {
+    isClearingAll.value = false
   }
 }
 
@@ -145,6 +162,16 @@ onMounted(loadAll)
         aria-label="刷新"
       >
         <RefreshCcw class="w-5 h-5" :class="isLoading && 'animate-spin'" />
+      </button>
+      <button
+        type="button"
+        :disabled="isClearingAll || items.length === 0"
+        class="h-11 px-3 rounded-xl bg-white border border-slate-200 flex items-center justify-center gap-1 text-xs font-bold text-rose-500 active:bg-rose-50 disabled:opacity-40"
+        @click="handleClearAll"
+        aria-label="清空全部结果"
+      >
+        <Trash class="w-4 h-4" />
+        {{ isClearingAll ? '清空中…' : '清空' }}
       </button>
     </div>
 

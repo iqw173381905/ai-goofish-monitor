@@ -18,6 +18,7 @@ from src.services.result_storage_service import (
     ALL_FILES_MARKER,
     build_result_ndjson,
     delete_result_file_records,
+    delete_all_result_records,
     delete_result_item_record,
     list_result_filenames,
     load_all_result_records,
@@ -201,6 +202,13 @@ class UpdateStatusRequest(BaseModel):
 
 class BlacklistRulesRequest(BaseModel):
     keywords: list[str]
+
+
+@router.delete("/files")
+async def delete_all_results():
+    """清空全部结果记录"""
+    deleted = await delete_all_result_records()
+    return {"message": f"已清空 {deleted} 条结果", "deleted": deleted}
 
 
 @router.delete("/{filename}/items/{item_id}")

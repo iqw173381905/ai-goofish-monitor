@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { Play, Square, RefreshCcw, Loader2, Pencil, X, BrainCircuit, Clock } from 'lucide-vue-next'
+import { Play, Square, RefreshCcw, Loader2, Pencil, X, BrainCircuit, Clock, Plus } from 'lucide-vue-next'
 import { useTasks } from '@/composables/useTasks'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
@@ -19,6 +19,7 @@ const {
   stopTask,
   stoppingTaskIds,
   updateTask,
+  createTask,
 } = useTasks()
 
 // 编辑弹窗状态（直接复用电脑端 TaskForm，保证功能 100% 一致）
@@ -26,6 +27,33 @@ const isEditOpen = ref(false)
 const editingTask = ref<Task | null>(null)
 const isSaving = ref(false)
 const accountOptions = ref<AccountItem[]>([])
+
+// 新建任务弹窗（复用电脑端 TaskForm create 模式）
+const isCreateOpen = ref(false)
+const isCreating = ref(false)
+function openCreate() {
+  isCreateOpen.value = true
+}
+function closeCreate() {
+  isCreateOpen.value = false
+}
+async function handleCreateTask(data: any) {
+  isCreating.value = true
+  try {
+    await createTask(data)
+    toast({ title: '任务已创建' })
+    closeCreate()
+    await fetchTasks()
+  } catch (e) {
+    toast({
+      title: '创建失败',
+      description: (e as Error).message,
+      variant: 'destructive',
+    })
+  } finally {
+    isCreating.value = false
+  }
+}
 
 // AI 标准重新生成
 const isRegenerating = ref(false)
@@ -176,8 +204,21 @@ function scheduleText(task: any) {
     <!-- 空状态 -->
     <div v-else-if="tasks.length === 0" class="flex flex-col items-center justify-center py-16 gap-3 text-slate-300">
       <p class="text-sm font-bold">暂无任务</p>
-      <p class="text-xs">请在电脑端创建任务</p>
+      <Button class="mt-2 h-11 px-6 text-base font-bold" @click="openCreate">
+        <Plus class="mr-2 h-5 w-5" />
+        新建任务
+      </Button>
     </div>
+
+    <!-- 新建任务按钮 -->
+    <Button
+      v-else
+      class="w-full h-12 text-base font-bold"
+      @click="openCreate"
+    >
+      <Plus class="mr-2 h-5 w-5" />
+      新建任务
+    </Button>
 
     <!-- 任务卡片 -->
     <article
@@ -268,9 +309,6 @@ function scheduleText(task: any) {
       </div>
     </article>
 
-    <p class="text-center text-xs text-slate-300 pt-2">
-      创建任务请用电脑端
-    </p>
   </div>
 
   <!-- 编辑弹窗：直接复用电脑端 TaskForm -->
@@ -316,6 +354,48 @@ function scheduleText(task: any) {
       </div>
     </div>
   </div>
+  <!-- 新建任务弹窗：复用电脑端 TaskForm -->
+  <div
+    v-if="isCreateOpen"
+    class="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="absolute inset-0 bg-slate-950/40" @click="closeCreate"></div>
+    <div class="relative w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between p-5 pb-3 flex-shrink-0">
+        <h2 class="text-base font-black text-slate-800">新建任务</h2>
+        <button
+          type="button"
+          class="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500"
+          @click="closeCreate"
+          aria-label="关闭"
+        >
+          <X class="w-5 h-5" />
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto px-5">
+        <TaskForm
+          mode="create"
+          :account-options="accountOptions"
+          @submit="(data) => handleCreateTask(data)"
+        />
+      </div>
+      <div class="p-5 pt-3 flex-shrink-0 border-t border-slate-100">
+        <Button
+          type="submit"
+          form="task-form"
+          class="w-full h-12 text-base font-bold"
+          :disabled="isCreating"
+        >
+          <Loader2 v-if="isCreating" class="mr-2 h-5 w-5 animate-spin" />
+          {{ isCreating ? '创建中…' : '创建任务' }}
+        </Button>
+        <div class="h-[env(safe-area-inset-bottom)]"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- AI 标准编辑弹窗 -->
   <div
     v-if="isCriteriaOpen"
