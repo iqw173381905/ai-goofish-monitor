@@ -22,6 +22,14 @@ SPIDER_DEBUG_LIMIT_ENV = "SPIDER_DEBUG_LIMIT"
 LifecycleHook = Callable[[int], Awaitable[None] | None]
 
 
+class TaskBusyError(Exception):
+    """已有其他任务的爬虫进程在运行时抛出。
+
+    服务器只有 2GB 内存，单个 Chromium 就要占数百 MB，多浏览器并发极易
+    耗尽内存导致整机无响应，因此同一时间只允许一个任务运行。
+    """
+
+
 class ProcessService:
     """进程管理服务"""
 
@@ -236,12 +244,32 @@ class ProcessService:
         self.task_names[task_id] = task_name
         self.exit_watchers[task_id] = asyncio.create_task(self._watch_process_exit(process))
 
+    def _running_task_names(self, exclude: int | None = None) -> list[str]:
+        """返回当前仍在运行的任务名（已结束但未清理的不算）。"""
+        names = []
+        for tid, process in self.processes.items():
+            if exclude is not None and tid == exclude:
+                continue
+            if process is not None and process.returncode is None:
+                names.append(self.task_names.get(tid, f"ID:{tid}"))
+        return names
+
     async def start_task(self, task_id: int, task_name: str) -> bool:
         """启动任务进程"""
         await self._drain_finished_process(task_id)
         if self.is_running(task_id):
             print(f"任务 '{task_name}' (ID: {task_id}) 已在运行中")
             return False
+
+        # 2GB 内存单并发限制：已有其他任务在跑时拒绝启动，避免多 Chromium
+        # 并发耗尽内存导致整机无响应（2026-10-14 故障）。
+        for tid in list(self.processes.keys()):
+            if tid != task_id:
+                await self._drain_finished_process(tid)
+        busy = self._running_task_names(exclude=task_id)
+        if busy:
+            print(f"任务 '{task_name}' 跳过启动：已有任务 {busy} 正在运行（单并发内存保护）")
+            raise TaskBusyError(f"任务「{busy[0]}」正在运行中，请等待其完成后再启动")
 
         decision = self.failure_guard.should_skip_start(
             task_name,

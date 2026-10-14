@@ -8,7 +8,7 @@ from typing import List
 
 from src.core.cron_utils import build_cron_trigger
 from src.domain.models.task import Task
-from src.services.process_service import ProcessService
+from src.services.process_service import ProcessService, TaskBusyError
 
 
 class SchedulerService:
@@ -78,4 +78,8 @@ class SchedulerService:
     async def _run_task(self, task_id: int, task_name: str):
         """执行定时任务"""
         print(f"定时任务触发: 正在为任务 '{task_name}' 启动爬虫...")
-        await self.process_service.start_task(task_id, task_name)
+        try:
+            await self.process_service.start_task(task_id, task_name)
+        except TaskBusyError as e:
+            # 单并发内存保护：已有任务在跑时本轮跳过，等下次调度
+            print(f"定时任务跳过: {e}")
