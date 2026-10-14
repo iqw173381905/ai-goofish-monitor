@@ -515,7 +515,15 @@ async def get_ai_failover_chain():
         )
     if settings.failover_enabled:
         for profile in get_failover_profiles():
-            chain.append({"kind": "profile", **_profile_public(profile)})
+            item = {"kind": "profile", **_profile_public(profile)}
+            # 与主配置完全相同的档案在实际调用时会被去重跳过，这里同样标记
+            if (profile.get("base_url") or "").rstrip("/") == (settings.base_url or "").rstrip(
+                "/"
+            ) and (profile.get("model_name") or "").strip() == (
+                settings.model_name or ""
+            ).strip():
+                item["skipped_as_duplicate"] = True
+            chain.append(item)
     return {
         "failover_enabled": settings.failover_enabled,
         "chain": chain,
