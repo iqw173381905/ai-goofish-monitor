@@ -8,9 +8,9 @@ const router = useRouter()
 const { logout } = useAuth()
 
 const links = [
-  { to: '/accounts', label: '账号管理', desc: '闲鱼登录状态', icon: Users },
-  { to: '/logs', label: '运行日志', desc: '查看任务日志', icon: Terminal },
-  { to: '/settings', label: '设置', desc: '通知、AI 等配置', icon: Settings2 },
+  { to: '/m/accounts', label: '账号管理', desc: '闲鱼登录状态', icon: Users },
+  { to: '/m/logs', label: '运行日志', desc: '查看任务日志', icon: Terminal },
+  { to: '/m/settings', label: '设置', desc: '通知、AI 等配置', icon: Settings2 },
 ]
 
 function goDesktop() {

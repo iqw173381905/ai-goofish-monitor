@@ -78,6 +78,24 @@ const routes = [
         component: () => import('@/views/mobile/MobileMoreView.vue'),
         meta: { titleKey: 'routes.more', requiresAuth: true },
       },
+      {
+        path: 'accounts',
+        name: 'MobileAccounts',
+        component: () => import('@/views/mobile/MobileAccountsView.vue'),
+        meta: { titleKey: 'routes.accounts', requiresAuth: true },
+      },
+      {
+        path: 'logs',
+        name: 'MobileLogs',
+        component: () => import('@/views/mobile/MobileLogsView.vue'),
+        meta: { titleKey: 'routes.logs', requiresAuth: true },
+      },
+      {
+        path: 'settings',
+        name: 'MobileSettings',
+        component: () => import('@/views/mobile/MobileSettingsView.vue'),
+        meta: { titleKey: 'routes.settings', requiresAuth: true },
+      },
     ],
   },
   {
