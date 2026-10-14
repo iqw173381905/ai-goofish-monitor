@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { Play, Square, RefreshCcw, Loader2, Pencil, X, BrainCircuit, Clock } from 'lucide-vue-next'
 import { useTasks } from '@/composables/useTasks'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toast'
 import { formatCountdown, formatNextRunAbsolute } from '@/lib/taskSchedule'
-import type { Task } from '@/types/task.d.ts'
+import TaskForm from '@/components/tasks/TaskForm.vue'
+import { listAccounts, type AccountItem } from '@/api/accounts'
+import type { Task, TaskUpdate } from '@/types/task.d.ts'
 
 const {
   tasks,
@@ -21,44 +19,11 @@ const {
   updateTask,
 } = useTasks()
 
-// cron 预设（和电脑端 TaskForm 一致）
-const EMPTY_CRON_VALUE = '__manual__'
-const cronPresets = computed(() => [
-  { value: EMPTY_CRON_VALUE, label: '手动触发' },
-  { value: '*/5 * * * *', label: '每 5 分钟' },
-  { value: '*/15 * * * *', label: '每 15 分钟' },
-  { value: '*/30 * * * *', label: '每 30 分钟' },
-  { value: '0 * * * *', label: '每小时' },
-  { value: '0 */2 * * *', label: '每 2 小时' },
-  { value: '0 */6 * * *', label: '每 6 小时' },
-  { value: '0 8 * * *', label: '每天 8 点' },
-  { value: '0 12 * * *', label: '每天 12 点' },
-  { value: '0 20 * * *', label: '每天 20 点' },
-])
-const isCustomCron = ref(false)
-
-function isPresetCronValue(v: string) {
-  if (!v) return true
-  return cronPresets.value.some((p) => p.value === v)
-}
-
-// 编辑弹窗状态
+// 编辑弹窗状态（直接复用电脑端 TaskForm，保证功能 100% 一致）
 const isEditOpen = ref(false)
 const editingTask = ref<Task | null>(null)
 const isSaving = ref(false)
-const editForm = ref({
-  task_name: '',
-  keyword: '',
-  description: '',
-  min_price: '',
-  max_price: '',
-  max_pages: '',
-  region: '',
-  cron: '',
-  personal_only: false,
-  free_shipping: false,
-  enabled: true,
-})
+const accountOptions = ref<AccountItem[]>([])
 
 // AI 标准重新生成
 const isRegenerating = ref(false)
@@ -67,11 +32,14 @@ const isRegenerating = ref(false)
 const nowMs = ref(Date.now())
 let countdownTimer: number | null = null
 
-onMounted(() => {
+onMounted(async () => {
   fetchTasks()
   countdownTimer = window.setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
+  try {
+    accountOptions.value = await listAccounts()
+  } catch { /* 账号列表加载失败不阻塞 */ }
 })
 
 onBeforeUnmount(() => {
@@ -104,22 +72,6 @@ function isKeywordMode(task: any) {
 
 function openEdit(task: Task) {
   editingTask.value = task
-  const cronVal = (task as any).cron || ''
-  editForm.value = {
-    task_name: task.task_name || '',
-    keyword: task.keyword || '',
-    description: (task as any).description || '',
-    min_price: task.min_price != null ? String(task.min_price) : '',
-    max_price: task.max_price != null ? String(task.max_price) : '',
-    max_pages: (task as any).max_pages != null ? String((task as any).max_pages) : '',
-    region: (task as any).region || '',
-    cron: cronVal,
-    personal_only: !!(task as any).personal_only,
-    free_shipping: !!(task as any).free_shipping,
-    enabled: !!task.enabled,
-  }
-  // 非预设的 cron 值 → 自定义模式
-  isCustomCron.value = !!cronVal && !isPresetCronValue(cronVal)
   isEditOpen.value = true
 }
 
@@ -128,31 +80,11 @@ function closeEdit() {
   editingTask.value = null
 }
 
-async function saveEdit() {
+async function handleUpdateTask(data: TaskUpdate) {
   if (!editingTask.value) return
-  if (!editForm.value.task_name.trim()) {
-    toast({ title: '任务名称不能为空', variant: 'destructive' })
-    return
-  }
-  if (!editForm.value.keyword.trim()) {
-    toast({ title: '关键词不能为空', variant: 'destructive' })
-    return
-  }
   isSaving.value = true
   try {
-    await updateTask(editingTask.value.id, {
-      task_name: editForm.value.task_name.trim(),
-      keyword: editForm.value.keyword.trim(),
-      description: editForm.value.description.trim(),
-      min_price: editForm.value.min_price === '' ? null : Number(editForm.value.min_price),
-      max_price: editForm.value.max_price === '' ? null : Number(editForm.value.max_price),
-      max_pages: editForm.value.max_pages === '' ? null : Number(editForm.value.max_pages),
-      region: editForm.value.region.trim() || null,
-      cron: editForm.value.cron.trim() || null,
-      personal_only: editForm.value.personal_only,
-      free_shipping: editForm.value.free_shipping,
-      enabled: editForm.value.enabled,
-    } as any)
+    await updateTask(editingTask.value.id, data)
     toast({ title: '已保存' })
     closeEdit()
     await fetchTasks()
@@ -319,7 +251,7 @@ function scheduleText(task: any) {
     </p>
   </div>
 
-  <!-- 编辑弹窗 -->
+  <!-- 编辑弹窗：直接复用电脑端 TaskForm -->
   <div
     v-if="isEditOpen"
     class="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
@@ -327,8 +259,8 @@ function scheduleText(task: any) {
     aria-modal="true"
   >
     <div class="absolute inset-0 bg-slate-950/40" @click="closeEdit"></div>
-    <div class="relative w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl p-5 pb-8 max-h-[90vh] overflow-y-auto">
-      <div class="flex items-center justify-between mb-4 sticky top-0 bg-white pb-2">
+    <div class="relative w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl max-h-[92vh] flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between p-5 pb-3 flex-shrink-0">
         <h2 class="text-base font-black text-slate-800">编辑任务</h2>
         <button
           type="button"
@@ -339,90 +271,27 @@ function scheduleText(task: any) {
           <X class="w-5 h-5" />
         </button>
       </div>
-
-      <div class="space-y-4">
-        <div>
-          <Label class="text-sm font-bold">任务名称</Label>
-          <Input v-model="editForm.task_name" class="mt-1 h-12 text-base" placeholder="任务名称" />
-        </div>
-        <div>
-          <Label class="text-sm font-bold">关键词</Label>
-          <Input v-model="editForm.keyword" class="mt-1 h-12 text-base" placeholder="搜索关键词" />
-        </div>
-        <div>
-          <Label class="text-sm font-bold">详细需求（AI 模式用）</Label>
-          <Textarea v-model="editForm.description" class="mt-1 text-base min-h-[80px]" placeholder="描述你想要什么样的商品…" />
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <Label class="text-sm font-bold">最低价</Label>
-            <Input v-model="editForm.min_price" type="number" inputmode="numeric" class="mt-1 h-12 text-base" placeholder="0" />
-          </div>
-          <div>
-            <Label class="text-sm font-bold">最高价</Label>
-            <Input v-model="editForm.max_price" type="number" inputmode="numeric" class="mt-1 h-12 text-base" placeholder="不限" />
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <Label class="text-sm font-bold">最大页数</Label>
-            <Input v-model="editForm.max_pages" type="number" inputmode="numeric" class="mt-1 h-12 text-base" placeholder="默认" />
-          </div>
-          <div>
-            <Label class="text-sm font-bold">地区</Label>
-            <Input v-model="editForm.region" class="mt-1 h-12 text-base" placeholder="如：上海" />
-          </div>
-        </div>
-        <div>
-          <Label class="text-sm font-bold">定时任务</Label>
-          <!-- 预设下拉 -->
-          <select
-            v-if="!isCustomCron"
-            :value="editForm.cron || EMPTY_CRON_VALUE"
-            @change="(e) => editForm.cron = (e.target as HTMLSelectElement).value === EMPTY_CRON_VALUE ? '' : (e.target as HTMLSelectElement).value"
-            class="mt-1 w-full h-12 text-base rounded-xl border border-slate-200 bg-white px-3"
-          >
-            <option v-for="p in cronPresets" :key="p.value" :value="p.value">
-              {{ p.label }}
-            </option>
-          </select>
-          <!-- 自定义输入 -->
-          <Input
-            v-else
-            v-model="editForm.cron"
-            class="mt-1 h-12 text-base font-mono"
-            placeholder="如：0 */2 * * *"
-          />
-          <button
-            type="button"
-            class="mt-1 text-xs text-primary font-bold"
-            @click="isCustomCron = !isCustomCron"
-          >
-            {{ isCustomCron ? '← 使用预设' : '自定义 cron →' }}
-          </button>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between py-1">
-            <Label class="text-sm font-bold">只看个人卖家</Label>
-            <Switch :model-value="editForm.personal_only" @update:model-value="(v: boolean) => editForm.personal_only = v" />
-          </div>
-          <div class="flex items-center justify-between py-1">
-            <Label class="text-sm font-bold">只看包邮</Label>
-            <Switch :model-value="editForm.free_shipping" @update:model-value="(v: boolean) => editForm.free_shipping = v" />
-          </div>
-          <div class="flex items-center justify-between py-1">
-            <Label class="text-sm font-bold">启用任务</Label>
-            <Switch :model-value="editForm.enabled" @update:model-value="(v: boolean) => editForm.enabled = v" />
-          </div>
-        </div>
+      <div class="flex-1 overflow-y-auto px-5">
+        <TaskForm
+          v-if="editingTask"
+          mode="edit"
+          :initial-data="editingTask"
+          :account-options="accountOptions"
+          @submit="(data) => handleUpdateTask(data as TaskUpdate)"
+        />
       </div>
-
-      <Button class="w-full h-12 mt-5 text-base font-bold" :disabled="isSaving" @click="saveEdit">
-        <Loader2 v-if="isSaving" class="mr-2 h-5 w-5 animate-spin" />
-        {{ isSaving ? '保存中…' : '保存' }}
-      </Button>
-      <!-- 底部安全区 -->
-      <div class="h-[env(safe-area-inset-bottom)]"></div>
+      <div class="p-5 pt-3 flex-shrink-0 border-t border-slate-100">
+        <Button
+          type="submit"
+          form="task-form"
+          class="w-full h-12 text-base font-bold"
+          :disabled="isSaving"
+        >
+          <Loader2 v-if="isSaving" class="mr-2 h-5 w-5 animate-spin" />
+          {{ isSaving ? '保存中…' : '保存' }}
+        </Button>
+        <div class="h-[env(safe-area-inset-bottom)]"></div>
+      </div>
     </div>
   </div>
 </template>
