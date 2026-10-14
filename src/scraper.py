@@ -1483,47 +1483,25 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                                 )
 
                                 # --- START: 提取结构化商品属性（品牌/型号/表径/功能等），供 AI 审核 ---
-                                # 详情页属性区为"标签：值"结构（如品牌：Apple/苹果），用 XPath
-                                # 定位"品牌"文本节点后向上找到同时包含"型号"的容器，再按标签正则提取。
+                                # 详情 API 的 itemDO.cpvLabels 即页面属性区的结构化数据：
+                                # [{"propertyName": "品牌", "valueName": "Apple/苹果"}, ...]
+                                # 标签由卖家自填、各类目各不相同；无属性时为空列表。
+                                # 注意：移动端页面 DOM 里没有该区域，必须从 API 取。
                                 try:
-                                    _dom_attrs = await detail_page.evaluate(
-                                        """() => {
-    const out = {};
-    const esc = s => s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
-    // 1. 定位属性区：找"短标签："模式最多的紧凑容器（<3000 字）
-    let bestText = '', bestCount = 0;
-    const els = document.querySelectorAll('div, dl, section, ul, table, form');
-    for (const el of els) {
-        const tc = el.textContent || '';
-        if (tc.indexOf('：') < 0 && tc.indexOf(':') < 0) continue;  // textContent 不触发排版，先粗筛
-        const t = el.innerText || '';
-        if (!t || t.length > 3000) continue;
-        const ms = t.match(/[^\\s：:]{1,12}[：:]/g) || [];
-        const uniq = new Set();
-        for (const mm of ms) { const lb = mm.slice(0, -1).trim(); if (lb) uniq.add(lb); }
-        if (uniq.size >= 2 && uniq.size > bestCount) { bestCount = uniq.size; bestText = t; }
-    }
-    if (!bestText) return out;
-    // 2. 提取该容器内全部"标签：值"对，值取到下一个标签或文本末尾
-    const labels = [];
-    {
-        const seen = new Set();
-        const ms = bestText.match(/[^\\s：:]{1,12}(?=[：:])/g) || [];
-        for (const mm of ms) { const lb = mm.trim(); if (lb && !seen.has(lb)) { seen.add(lb); labels.push(lb); } }
-    }
-    if (!labels.length) return out;
-    const alt = labels.map(esc).join('|');
-    const re = new RegExp('(' + alt + ')\\\\s*[：:]\\\\s*([\\\\s\\\\S]*?)(?=(?:' + alt + ')\\\\s*[：:]|$)', 'g');
-    let m;
-    while ((m = re.exec(bestText)) !== null) {
-        const v = (m[2] || '').trim().replace(/\\s+/g, ' ');
-        if (v && !(m[1] in out)) out[m[1]] = v.slice(0, 120);
-    }
-    return out;
-}"""
+                                    _cpv_labels = await safe_get(
+                                        item_do, "cpvLabels", default=[]
                                     )
-                                    if isinstance(_dom_attrs, dict) and _dom_attrs:
-                                        item_data["商品属性"] = _dom_attrs
+                                    if isinstance(_cpv_labels, list) and _cpv_labels:
+                                        _attrs = {}
+                                        for _cpv in _cpv_labels:
+                                            if not isinstance(_cpv, dict):
+                                                continue
+                                            _k = _cpv.get("propertyName")
+                                            _v = _cpv.get("valueName")
+                                            if _k and _v and str(_k) not in _attrs:
+                                                _attrs[str(_k)] = str(_v)[:120]
+                                        if _attrs:
+                                            item_data["商品属性"] = _attrs
                                 except Exception as _attr_e:
                                     log_time(f"提取商品属性失败（不影响主流程）: {_attr_e}")
                                 # --- END ---
