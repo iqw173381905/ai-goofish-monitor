@@ -15,7 +15,7 @@ from src.ai_handler import send_ntfy_notification
 from src.config import STATE_FILE
 from src.failure_guard import FailureGuard
 from src.infrastructure.persistence.sqlite_task_repository import find_task_by_name_sync
-from src.services.shared_browser import SharedBrowserService, SHARED_BROWSER_WS_ENV
+from src.services.shared_browser import SharedBrowserService, SHARED_BROWSER_CDP_ENV
 from src.utils import build_task_log_path
 
 STOP_TIMEOUT_SECONDS = 20
@@ -221,11 +221,11 @@ class ProcessService:
         child_env = os.environ.copy()
         child_env["PYTHONIOENCODING"] = "utf-8"
         child_env["PYTHONUTF8"] = "1"
-        # 共享浏览器：确保常驻 Chromium 在运行，把 ws_endpoint 传给子进程；
+        # 共享浏览器：确保常驻 Chromium 在运行，把 CDP endpoint 传给子进程；
         # 子进程连接后只建自己的 context。失败则不传变量，子进程回退到独立浏览器。
         try:
-            ws_endpoint = await self.shared_browser.ensure_running()
-            child_env[SHARED_BROWSER_WS_ENV] = ws_endpoint
+            cdp_url = await self.shared_browser.ensure_running()
+            child_env[SHARED_BROWSER_CDP_ENV] = cdp_url
             print(f"[共享浏览器] 任务 '{task_name}' 将连接共享浏览器")
         except Exception as exc:
             print(f"[共享浏览器] 启动失败（{exc}），任务 '{task_name}' 将使用独立浏览器")

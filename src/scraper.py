@@ -48,7 +48,7 @@ from src.utils import (
 )
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
 from src.failure_guard import FailureGuard
-from src.services.shared_browser import SHARED_BROWSER_WS_ENV
+from src.services.shared_browser import SHARED_BROWSER_CDP_ENV
 from src.services.account_strategy_service import resolve_account_runtime_plan
 from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.item_analysis_dispatcher import (
@@ -274,18 +274,18 @@ def prepare_chromium_launch_args() -> list[str]:
     return build_chromium_launch_args(crash_dumps_dir)
 
 
-async def connect_shared_browser(p, ws_endpoint: str):
-    """连接应用内共享浏览器，失败时重试一次。
+async def connect_shared_browser(p, cdp_url: str):
+    """连接应用内共享浏览器（CDP），失败时重试一次。
 
     返回已连接的 browser。两次都失败则抛异常，调用方回退到独立 launch。
     注意：返回的 browser 绝不能 close()，否则会关掉所有任务共用的浏览器。
     """
     try:
-        return await p.chromium.connect(ws_endpoint)
+        return await p.chromium.connect_over_cdp(cdp_url)
     except Exception as first_err:
         print(f"[共享浏览器] 首次连接失败（{first_err}），3 秒后重试一次…")
     await asyncio.sleep(3)
-    return await p.chromium.connect(ws_endpoint)
+    return await p.chromium.connect_over_cdp(cdp_url)
 
 
 def _format_failure_reason(reason: str, limit: int = 500) -> str:
@@ -841,17 +841,17 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
             print(f"警告：读取登录状态文件失败，将直接按路径使用: {e}")
 
         async with async_playwright() as p:
-            # 共享浏览器模式（Phase 2）：GOOFISH_SHARED_BROWSER_WS 由 ProcessService
+            # 共享浏览器模式（Phase 2）：GOOFISH_SHARED_BROWSER_CDP 由 ProcessService
             # 在启动子进程前注入。连接成功后只创建本任务的独立 context（登录态、
             # proxy 都在 context 级别隔离），任务结束只关 context，绝不关 browser。
             # 无该环境变量时走原来的独立 launch 路径（本地调试用）。
-            shared_ws = os.environ.get(SHARED_BROWSER_WS_ENV, "").strip()
+            shared_cdp = os.environ.get(SHARED_BROWSER_CDP_ENV, "").strip()
             owns_browser = True
             context_proxy = None
             browser = None
-            if shared_ws:
+            if shared_cdp:
                 try:
-                    browser = await connect_shared_browser(p, shared_ws)
+                    browser = await connect_shared_browser(p, shared_cdp)
                     owns_browser = False
                     if proxy_server:
                         context_proxy = {"server": proxy_server}
