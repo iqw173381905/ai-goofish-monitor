@@ -7,6 +7,8 @@ import { toast } from '@/components/ui/toast'
 import { formatCountdown, formatNextRunAbsolute } from '@/lib/taskSchedule'
 import TaskForm from '@/components/tasks/TaskForm.vue'
 import { listAccounts, type AccountItem } from '@/api/accounts'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import type { Task, TaskUpdate } from '@/types/task.d.ts'
 
 const {
@@ -100,15 +102,36 @@ async function handleUpdateTask(data: TaskUpdate) {
 }
 
 // AI 标准重新生成
-async function regenerateCriteria(task: Task) {
-  if (isKeywordMode(task)) return
+const isCriteriaOpen = ref(false)
+const criteriaTask = ref<Task | null>(null)
+const criteriaDescription = ref('')
+
+function openCriteriaDialog(task: Task) {
+  criteriaTask.value = task
+  criteriaDescription.value = (task as any).description || ''
+  isCriteriaOpen.value = true
+}
+
+function closeCriteriaDialog() {
+  isCriteriaOpen.value = false
+  criteriaTask.value = null
+}
+
+// AI 标准重新生成（弹窗编辑提示词后提交）
+async function submitCriteria() {
+  if (!criteriaTask.value) return
+  if (!criteriaDescription.value.trim()) {
+    toast({ title: '请填写需求描述', variant: 'destructive' })
+    return
+  }
   isRegenerating.value = true
   try {
-    await updateTask(task.id, {
-      description: (task as any).description || task.task_name,
+    await updateTask(criteriaTask.value.id, {
+      description: criteriaDescription.value.trim(),
       regenerate_criteria: true,
     } as any)
     toast({ title: '已提交重新生成', description: 'AI 正在生成新的分析标准…' })
+    closeCriteriaDialog()
     await fetchTasks()
   } catch (e) {
     toast({
@@ -237,11 +260,10 @@ function scheduleText(task: any) {
           v-if="!isKeywordMode(task) && !(task as any).criteria_generating"
           variant="outline"
           class="w-full h-10 text-sm"
-          :disabled="isRegenerating"
-          @click="regenerateCriteria(task)"
+          @click="openCriteriaDialog(task)"
         >
           <BrainCircuit class="mr-2 h-4 w-4" />
-          {{ isRegenerating ? '提交中…' : '重新生成 AI 标准' }}
+          重新生成 AI 标准
         </Button>
       </div>
     </article>
@@ -292,6 +314,49 @@ function scheduleText(task: any) {
         </Button>
         <div class="h-[env(safe-area-inset-bottom)]"></div>
       </div>
+    </div>
+  </div>
+  <!-- AI 标准编辑弹窗 -->
+  <div
+    v-if="isCriteriaOpen"
+    class="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="absolute inset-0 bg-slate-950/40" @click="closeCriteriaDialog"></div>
+    <div class="relative w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl p-5 pb-8 max-h-[85vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-base font-black text-slate-800">重新生成 AI 标准</h2>
+        <button
+          type="button"
+          class="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500"
+          @click="closeCriteriaDialog"
+          aria-label="关闭"
+        >
+          <X class="w-5 h-5" />
+        </button>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">
+        修改需求描述后提交，AI 会重新生成分析标准
+      </p>
+      <div>
+        <Label class="text-sm font-bold">需求描述</Label>
+        <Textarea
+          v-model="criteriaDescription"
+          class="mt-1 min-h-[140px] text-base"
+          placeholder="描述你想要什么样的商品…"
+        />
+      </div>
+      <div class="flex gap-2 mt-4">
+        <Button variant="outline" class="flex-1 h-12 text-base" @click="closeCriteriaDialog">
+          取消
+        </Button>
+        <Button class="flex-1 h-12 text-base font-bold" :disabled="isRegenerating" @click="submitCriteria">
+          <Loader2 v-if="isRegenerating" class="mr-2 h-5 w-5 animate-spin" />
+          {{ isRegenerating ? '生成中…' : '提交生成' }}
+        </Button>
+      </div>
+      <div class="h-[env(safe-area-inset-bottom)]"></div>
     </div>
   </div>
 </template>
