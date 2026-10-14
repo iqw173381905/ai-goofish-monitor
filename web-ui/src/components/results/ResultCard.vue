@@ -31,7 +31,7 @@ const priceInsight = props.item.price_insight
 
 // 原价为占位值时不显示（后端无原价时填"暂无"）
 const showOriginalPrice = computed(() => {
-  const v = props.item.info?.['商品原价']
+  const v = (props.item as any).info?.['商品原价']
   return v && !['暂无', '-', 'N/A', '价格异常'].includes(String(v).trim())
 })
 
