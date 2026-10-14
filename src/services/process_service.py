@@ -42,6 +42,9 @@ class ProcessService:
         self.failure_guard = FailureGuard()
         self._on_started: LifecycleHook | None = None
         self._on_stopped: LifecycleHook | None = None
+        # 启动互斥锁：防止调度器同时触发多个任务时，两个 start_task 交错执行
+        # 都通过"无运行中任务"检查、最终并发起两个浏览器（2026-10-14 实测发生过）。
+        self._start_lock = asyncio.Lock()
 
     def set_lifecycle_hooks(
         self,
@@ -256,6 +259,10 @@ class ProcessService:
 
     async def start_task(self, task_id: int, task_name: str) -> bool:
         """启动任务进程"""
+        async with self._start_lock:
+            return await self._start_task_locked(task_id, task_name)
+
+    async def _start_task_locked(self, task_id: int, task_name: str) -> bool:
         await self._drain_finished_process(task_id)
         if self.is_running(task_id):
             print(f"任务 '{task_name}' (ID: {task_id}) 已在运行中")
