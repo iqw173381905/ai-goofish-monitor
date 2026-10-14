@@ -1488,28 +1488,39 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                                 try:
                                     _dom_attrs = await detail_page.evaluate(
                                         """() => {
-                                            const out = {};
-                                            const labels = ['品牌','型号','表径','功能','成色','连接方式','颜色','尺寸','容量','版本'];
-                                            const xp = document.evaluate(
-                                                "//*[contains(text(), '品牌：') or contains(text(), '品牌:')]",
-                                                document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
-                                            );
-                                            const node = xp.singleNodeValue;
-                                            if (!node) return out;
-                                            let el = node.parentElement, container = null;
-                                            while (el && el !== document.body) {
-                                                const t = el.innerText || '';
-                                                if (/型号\\s*[：:]/.test(t)) { container = el; break; }
-                                                el = el.parentElement;
-                                            }
-                                            const text = container ? (container.innerText || '') : '';
-                                            const labelAlt = labels.join('|');
-                                            for (const lb of labels) {
-                                            const m = text.match(new RegExp(lb + '\\s*[：:]\\s*([\\s\\S]*?)(?=(?:' + labelAlt + ')\\s*[：:]|$)'));
-                                            if (m && m[1].trim()) out[lb] = m[1].trim().replace(/\s+/g, ' ').slice(0, 120);
-                                            }
-                                            return out;
-                                        }"""
+    const out = {};
+    const esc = s => s.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+    // 1. 定位属性区：找"短标签："模式最多的紧凑容器（<3000 字）
+    let bestText = '', bestCount = 0;
+    const els = document.querySelectorAll('div, dl, section, ul, table, form');
+    for (const el of els) {
+        const tc = el.textContent || '';
+        if (tc.indexOf('：') < 0 && tc.indexOf(':') < 0) continue;  // textContent 不触发排版，先粗筛
+        const t = el.innerText || '';
+        if (!t || t.length > 3000) continue;
+        const ms = t.match(/[^\\s：:]{1,12}[：:]/g) || [];
+        const uniq = new Set();
+        for (const mm of ms) { const lb = mm.slice(0, -1).trim(); if (lb) uniq.add(lb); }
+        if (uniq.size >= 2 && uniq.size > bestCount) { bestCount = uniq.size; bestText = t; }
+    }
+    if (!bestText) return out;
+    // 2. 提取该容器内全部"标签：值"对，值取到下一个标签或文本末尾
+    const labels = [];
+    {
+        const seen = new Set();
+        const ms = bestText.match(/[^\\s：:]{1,12}(?=[：:])/g) || [];
+        for (const mm of ms) { const lb = mm.trim(); if (lb && !seen.has(lb)) { seen.add(lb); labels.push(lb); } }
+    }
+    if (!labels.length) return out;
+    const alt = labels.map(esc).join('|');
+    const re = new RegExp('(' + alt + ')\\\\s*[：:]\\\\s*([\\\\s\\\\S]*?)(?=(?:' + alt + ')\\\\s*[：:]|$)', 'g');
+    let m;
+    while ((m = re.exec(bestText)) !== null) {
+        const v = (m[2] || '').trim().replace(/\\s+/g, ' ');
+        if (v && !(m[1] in out)) out[m[1]] = v.slice(0, 120);
+    }
+    return out;
+}"""
                                     )
                                     if isinstance(_dom_attrs, dict) and _dom_attrs:
                                         item_data["商品属性"] = _dom_attrs
