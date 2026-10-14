@@ -16,12 +16,12 @@ context，绝不关闭共享浏览器。
 
 import asyncio
 import json
-import os
+import shutil
 import tempfile
 import urllib.request
 
 SHARED_BROWSER_CDP_ENV = "GOOFISH_SHARED_BROWSER_CDP"
-_PROFILE_DIRNAME = "goofish-shared-browser-profile"
+_PROFILE_PREFIX = "goofish-shared-browser-"
 
 
 class SharedBrowserService:
@@ -30,6 +30,7 @@ class SharedBrowserService:
     def __init__(self) -> None:
         self._proc: asyncio.subprocess.Process | None = None
         self._cdp_url: str | None = None
+        self._profile_dir: str | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -67,8 +68,12 @@ class SharedBrowserService:
         async with async_playwright() as p:
             exe = p.chromium.executable_path
 
-        profile_dir = os.path.join(tempfile.gettempdir(), _PROFILE_DIRNAME)
-        os.makedirs(profile_dir, exist_ok=True)
+        # 每次启动用全新的临时 profile 目录：避免复用目录时的
+        # SingletonLock 冲突（旧进程残留锁会导致新进程直接退出）。
+        # 共享浏览器只是各任务 context 的容器，任务登录态走各自的
+        # storage_state，不依赖 profile 持久化。
+        profile_dir = tempfile.mkdtemp(prefix=_PROFILE_PREFIX)
+        self._profile_dir = profile_dir
 
         args = list(prepare_chromium_launch_args())
         if RUN_HEADLESS:
@@ -134,6 +139,12 @@ class SharedBrowserService:
                 except Exception:
                     pass
         self._cdp_url = None
+        if self._profile_dir:
+            profile_dir, self._profile_dir = self._profile_dir, None
+            try:
+                shutil.rmtree(profile_dir, ignore_errors=True)
+            except Exception:
+                pass
 
     async def close(self) -> None:
         """应用关闭时释放共享浏览器。"""
