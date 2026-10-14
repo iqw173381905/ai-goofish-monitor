@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { RefreshCcw, ExternalLink, Star } from 'lucide-vue-next'
-import { getResultFiles, getResultContent } from '@/api/results'
+import { RefreshCcw, ExternalLink, Star, Trash2 } from 'lucide-vue-next'
+import { getResultFiles, getResultContent, deleteResultItem } from '@/api/results'
+import { formatDateTime } from '@/i18n'
+import { toast } from '@/components/ui/toast'
 import type { ResultItem } from '@/types/result.d.ts'
 
 const files = ref<string[]>([])
@@ -24,6 +26,7 @@ async function loadAll() {
         }
         const res: any = await getResultContent(f, params)
         const list = Array.isArray(res) ? res : (res.items || [])
+        for (const it of list) (it as any)._sourceFile = f
         all.push(...list)
       } catch { /* 跳过失败的文件 */ }
     }
@@ -75,6 +78,33 @@ function itemWant(it: any) {
 }
 function itemRegion(it: any) {
   return getInfo(it)['发货地区'] || ''
+}
+function itemCrawlTime(it: any) {
+  const t = it['爬取时间']
+  return t ? formatDateTime(t, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+}
+function itemId(it: any) {
+  return getInfo(it)['商品ID'] || ''
+}
+const deletingIdx = ref<number | null>(null)
+async function handleDelete(it: any, idx: number) {
+  const filename = (it as any)._sourceFile
+  const id = itemId(it)
+  if (!filename || !id) {
+    toast({ title: '无法删除', description: '缺少文件或商品标识', variant: 'destructive' })
+    return
+  }
+  if (!window.confirm(`确定删除「${itemTitle(it).slice(0, 20)}」吗？`)) return
+  deletingIdx.value = idx
+  try {
+    await deleteResultItem(filename, id)
+    items.value.splice(idx, 1)
+    toast({ title: '已删除' })
+  } catch (e) {
+    toast({ title: '删除失败', description: (e as Error).message, variant: 'destructive' })
+  } finally {
+    deletingIdx.value = null
+  }
 }
 
 onMounted(loadAll)
@@ -154,16 +184,28 @@ onMounted(loadAll)
               </span>
               <span v-if="itemWant(it)" class="text-[11px] text-slate-400">{{ itemWant(it) }}人想要</span>
               <span v-if="itemRegion(it)" class="text-[11px] text-slate-400">{{ itemRegion(it) }}</span>
+              <span v-if="itemCrawlTime(it)" class="text-[11px] text-slate-400">{{ itemCrawlTime(it) }} 抓取</span>
             </div>
-            <a
-              v-if="itemLink(it)"
-              :href="itemLink(it)"
-              target="_blank"
-              rel="noopener"
-              class="inline-flex items-center gap-1 mt-2 text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-lg active:bg-primary/20"
-            >
-              <ExternalLink class="w-3.5 h-3.5" /> 去闲鱼查看
-            </a>
+            <div class="flex items-center gap-2 mt-2">
+              <a
+                v-if="itemLink(it)"
+                :href="itemLink(it)"
+                target="_blank"
+                rel="noopener"
+                class="inline-flex items-center gap-1 text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-lg active:bg-primary/20"
+              >
+                <ExternalLink class="w-3.5 h-3.5" /> 去闲鱼查看
+              </a>
+              <button
+                type="button"
+                :disabled="deletingIdx === idx"
+                @click="handleDelete(it, idx)"
+                class="inline-flex items-center gap-1 text-xs font-bold text-rose-500 bg-rose-50 px-3 py-1.5 rounded-lg active:bg-rose-100 disabled:opacity-50"
+                aria-label="删除该商品"
+              >
+                <Trash2 class="w-3.5 h-3.5" /> {{ deletingIdx === idx ? '删除中…' : '删除' }}
+              </button>
+            </div>
           </div>
         </div>
       </article>

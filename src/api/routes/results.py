@@ -18,6 +18,7 @@ from src.services.result_storage_service import (
     ALL_FILES_MARKER,
     build_result_ndjson,
     delete_result_file_records,
+    delete_result_item_record,
     list_result_filenames,
     load_all_result_records,
     load_result_blacklist_keywords,
@@ -200,6 +201,21 @@ class UpdateStatusRequest(BaseModel):
 
 class BlacklistRulesRequest(BaseModel):
     keywords: list[str]
+
+
+@router.delete("/{filename}/items/{item_id}")
+async def delete_result_item(filename: str, item_id: str):
+    """删除指定结果文件中的单个商品"""
+    try:
+        validate_result_filename(filename)
+        if filename == ALL_FILES_MARKER:
+            raise HTTPException(status_code=400, detail="全部任务视图不支持删除单个商品")
+        deleted = await delete_result_item_record(filename, item_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="商品未找到")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"message": "已删除"}
 
 
 @router.patch("/{filename}/items/{item_id}/status")

@@ -329,6 +329,21 @@ def _delete_result_file_records_sync(filename: str) -> int:
     return int(cursor.rowcount or 0)
 
 
+async def delete_result_item_record(filename: str, item_id: str) -> bool:
+    return await asyncio.to_thread(_delete_result_item_record_sync, filename, item_id)
+
+
+def _delete_result_item_record_sync(filename: str, item_id: str) -> bool:
+    bootstrap_sqlite_storage()
+    with sqlite_connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM result_items WHERE result_filename = ? AND item_id = ?",
+            (filename, item_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 async def query_result_records(
     filename: str,
     *,

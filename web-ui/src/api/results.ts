@@ -23,6 +23,10 @@ export async function deleteResultFile(filename: string): Promise<{ message: str
   return await http(`/api/results/files/${filename}`, { method: 'DELETE' })
 }
 
+export async function deleteResultItem(filename: string, itemId: string): Promise<{ message: string }> {
+  return await http(`/api/results/${filename}/items/${encodeURIComponent(itemId)}`, { method: 'DELETE' })
+}
+
 export async function getResultContent(
   filename: string,
   params: GetResultContentParams = {}

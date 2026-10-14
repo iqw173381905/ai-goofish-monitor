@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { RefreshCcw, ChevronDown } from 'lucide-vue-next'
+import { RefreshCcw, ChevronDown, Trash2 } from 'lucide-vue-next'
 import { useTasks } from '@/composables/useTasks'
-import { getLogs } from '@/api/logs'
+import { getLogs, clearLogs } from '@/api/logs'
 import { toast } from '@/components/ui/toast'
 
 const { tasks, fetchTasks } = useTasks()
@@ -42,6 +42,23 @@ function selectTask(id: number) {
   logs.value = ''
   pos.value = 0
   loadLogs()
+}
+
+const isClearing = ref(false)
+async function handleClearLogs() {
+  if (selectedTaskId.value === null || isClearing.value) return
+  if (!window.confirm('确定清空该任务的日志吗？')) return
+  isClearing.value = true
+  try {
+    await clearLogs(selectedTaskId.value)
+    logs.value = ''
+    pos.value = 0
+    toast({ title: '日志已清空' })
+  } catch (e) {
+    toast({ title: '清空失败', description: (e as Error).message, variant: 'destructive' })
+  } finally {
+    isClearing.value = false
+  }
 }
 
 onMounted(async () => {
@@ -87,14 +104,25 @@ onBeforeUnmount(() => {
         <span :class="['w-2 h-2 rounded-full', autoRefresh ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300']"></span>
         {{ autoRefresh ? '自动刷新开' : '自动刷新关' }}
       </button>
-      <button
-        type="button"
-        class="inline-flex items-center gap-1 text-xs font-bold text-slate-500"
-        @click="loadLogs"
-      >
-        <RefreshCcw class="w-4 h-4" :class="isLoading && 'animate-spin'" />
-        刷新
-      </button>
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          :disabled="isClearing || selectedTaskId === null"
+          class="inline-flex items-center gap-1 text-xs font-bold text-rose-500 disabled:opacity-40"
+          @click="handleClearLogs"
+        >
+          <Trash2 class="w-4 h-4" />
+          {{ isClearing ? '清空中…' : '清空' }}
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 text-xs font-bold text-slate-500"
+          @click="loadLogs"
+        >
+          <RefreshCcw class="w-4 h-4" :class="isLoading && 'animate-spin'" />
+          刷新
+        </button>
+      </div>
     </div>
 
     <div
