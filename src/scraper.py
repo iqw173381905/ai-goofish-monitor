@@ -243,6 +243,7 @@ def build_chromium_launch_args(crash_dumps_dir: str) -> list[str]:
     return [
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
+        "--disable-gpu",
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-web-security",
@@ -251,6 +252,19 @@ def build_chromium_launch_args(crash_dumps_dir: str) -> list[str]:
         "--disable-features=IsolateOrigins,site-per-process,Crashpad",
         f"--crash-dumps-dir={crash_dumps_dir}",
     ]
+
+
+# 内存减肥：拦截图片/媒体/字体请求。爬虫只读 DOM 文本与价格，商品图片 URL
+# 从元素属性中提取、由 ImageDownloader 独立下载，不依赖浏览器实际渲染图片。
+_BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
+
+
+async def _block_heavy_resource_route(route) -> None:
+    """Playwright 路由回调：图片/媒体/字体直接 abort，其余放行。"""
+    if route.request.resource_type in _BLOCKED_RESOURCE_TYPES:
+        await route.abort()
+    else:
+        await route.continue_()
 
 
 def prepare_chromium_launch_args() -> list[str]:
@@ -847,6 +861,8 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
             context = await browser.new_context(
                 storage_state=storage_state_arg, **context_kwargs
             )
+            # 2GB 内存减肥：不下载图片/媒体/字体（文字与价格不受影响）
+            await context.route("**/*", _block_heavy_resource_route)
             seller_profile_cache = SellerProfileCache(
                 ttl_seconds=_get_seller_profile_cache_ttl(task_config)
             )
