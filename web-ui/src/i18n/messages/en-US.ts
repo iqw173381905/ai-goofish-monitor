@@ -306,6 +306,7 @@ const enUS = {
       saveActiveHint: 'The active config is not saved as a profile yet. One click saves it, no manual re-entry needed.',
       saveActivePrompt: 'Profile name:',
       activeProfileDefaultName: 'Primary',
+      failoverActualOrder: 'Actual try order: ',
     },
     rotation: { saved: 'Rotation settings saved.', saveFailed: 'Failed to save rotation settings.' },
     status: {

@@ -3,8 +3,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useSettings } from '@/composables/useSettings'
-import type { NotificationSettingsUpdate, NotificationTestResponse, AiProfile, AiProfilePayload } from '@/api/settings'
-import { getAiProfiles, createAiProfile, createAiProfileFromActive, updateAiProfile, deleteAiProfile, applyAiProfile, updateAiProfileFailoverOrder, getAiSettings, getSystemStatus } from '@/api/settings'
+import type { NotificationSettingsUpdate, NotificationTestResponse, AiProfile, AiProfilePayload, AiFailoverChainItem } from '@/api/settings'
+import { getAiProfiles, createAiProfile, createAiProfileFromActive, updateAiProfile, deleteAiProfile, applyAiProfile, updateAiProfileFailoverOrder, getAiFailoverChain, getAiSettings, getSystemStatus } from '@/api/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -80,6 +80,12 @@ function notifyError(title: string, description?: string) {
 async function loadAiProfiles() {
   isProfilesLoading.value = true
   try {
+    try {
+      const chainRes = await getAiFailoverChain()
+      failoverChain.value = chainRes.chain || []
+    } catch {
+      failoverChain.value = []
+    }
     const res = await getAiProfiles()
     aiProfiles.value = res.profiles
     if (selectedProfileId.value) {
@@ -133,9 +139,19 @@ async function handleDeleteProfile() {
 }
 
 // ---- AI 故障转移 ----
-const failoverList = computed(() =>
-  [...aiProfiles.value].sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.id - b.id)
+const failoverChain = ref<AiFailoverChainItem[]>([])
+const failoverChainText = computed(() =>
+  failoverChain.value.map(c => `${c.name}（${c.model_name}）`).join(' → ')
 )
+// 管理列表按实际执行顺序排：当前生效的档案置顶固定，其余按 priority
+const orderedProfiles = computed(() => {
+  const sorted = [...aiProfiles.value].sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.id - b.id)
+  if (activeProfileId.value == null) return sorted
+  const idx = sorted.findIndex(p => p.id === activeProfileId.value)
+  if (idx <= 0) return sorted
+  const [active] = sorted.splice(idx, 1)
+  return [active as AiProfile, ...sorted]
+})
 
 async function handleToggleProfileFailover(profile: AiProfile) {
   try {
@@ -174,10 +190,22 @@ async function handleSaveActiveAsProfile() {
   }
 }
 
-async function handleMoveProfile(index: number, direction: -1 | 1) {
-  const list = failoverList.value
+function canMoveProfile(index: number, direction: -1 | 1): boolean {
+  const list = orderedProfiles.value
   const target = index + direction
-  if (target < 0 || target >= list.length) return
+  if (target < 0 || target >= list.length) return false
+  const activeId = activeProfileId.value
+  if (activeId === null) return true
+  // 当前生效的档案固定排首位：它不动，别人也不能越过它
+  if (list[index]?.id === activeId) return false
+  if (target === 0) return false
+  return true
+}
+
+async function handleMoveProfile(index: number, direction: -1 | 1) {
+  if (!canMoveProfile(index, direction)) return
+  const list = orderedProfiles.value
+  const target = index + direction
   const ids = list.map(p => p.id)
   const moving = ids.splice(index, 1)[0] as number
   ids.splice(target, 0, moving)
@@ -410,9 +438,12 @@ watch(selectedPrompt, async (value) => {
                 <div class="mt-2 border-t pt-4">
                   <Label class="text-sm font-medium">{{ t('settings.ai.failoverChainTitle') }}</Label>
                   <p class="mt-1 mb-3 text-xs text-gray-500">{{ t('settings.ai.failoverChainHint') }}</p>
-                  <div v-if="failoverList.length === 0" class="text-sm text-gray-500">{{ t('settings.ai.emptyProfiles') }}</div>
+                  <p v-if="failoverChainText" class="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-gray-600">
+                    {{ t('settings.ai.failoverActualOrder') }}<span class="font-medium text-gray-800">{{ failoverChainText }}</span>
+                  </p>
+                  <div v-if="orderedProfiles.length === 0" class="text-sm text-gray-500">{{ t('settings.ai.emptyProfiles') }}</div>
                   <ul v-else class="space-y-2">
-                    <li v-for="(p, idx) in failoverList" :key="p.id" class="flex items-center gap-2 rounded-lg border px-3 py-2">
+                    <li v-for="(p, idx) in orderedProfiles" :key="p.id" class="flex items-center gap-2 rounded-lg border px-3 py-2">
                       <span class="w-6 shrink-0 text-center text-xs font-bold text-gray-400">{{ idx + 1 }}</span>
                       <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-1.5">
@@ -425,10 +456,10 @@ watch(selectedPrompt, async (value) => {
                         <Switch :checked="p.enabled" @update:checked="() => handleToggleProfileFailover(p)" />
                         {{ t('settings.ai.failoverParticipate') }}
                       </span>
-                      <Button variant="outline" size="sm" :disabled="idx === 0" @click="handleMoveProfile(idx, -1)">
+                      <Button variant="outline" size="sm" :disabled="!canMoveProfile(idx, -1)" @click="handleMoveProfile(idx, -1)">
                         {{ t('settings.ai.moveUp') }}
                       </Button>
-                      <Button variant="outline" size="sm" :disabled="idx === failoverList.length - 1" @click="handleMoveProfile(idx, 1)">
+                      <Button variant="outline" size="sm" :disabled="!canMoveProfile(idx, 1)" @click="handleMoveProfile(idx, 1)">
                         {{ t('settings.ai.moveDown') }}
                       </Button>
                     </li>

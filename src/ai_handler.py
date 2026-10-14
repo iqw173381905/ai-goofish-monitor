@@ -20,6 +20,7 @@ if sys.platform.startswith('win'):
 
 from src.config import (
     AI_DEBUG_MODE,
+    API_KEY,
     BASE_URL,
     IMAGE_DOWNLOAD_HEADERS,
     IMAGE_SAVE_DIR,
@@ -437,28 +438,32 @@ def _is_failover_enabled() -> bool:
     return os.getenv("AI_FAILOVER_ENABLED", "true").strip().lower() == "true"
 
 
+def _failover_env_kwargs() -> dict:
+    return {
+        "env_base_url": BASE_URL or "",
+        "env_model_name": MODEL_NAME or "",
+        "env_api_key": API_KEY or "",
+        "env_proxy": os.getenv("PROXY_URL") or "",
+    }
+
+
 def _build_failover_chain():
     """构建 AI 故障转移链：[(显示名, 客户端, 模型名), ...]。
 
-    主配置（当前 .env 生效）永远第一顺位；随后按 priority 轮询所有
-    enabled=1 的模型档案（与主配置相同的档案自动去重）。
+    没有"主配置"这种特殊概念——链 = [当前生效的档案] + [其余启用的档案按 priority]。
+    生效配置没有对应档案时，首位是"未存档配置"（.env 当前值）。
+    开关关闭时只用首位模型（单模型模式）。
     """
-    if not _is_failover_enabled():
-        return [(f"主配置（{MODEL_NAME}）", client, MODEL_NAME)] if client else []
     try:
-        from src.services.ai_failover import load_failover_chain
+        from src.services.ai_failover import resolve_failover_chain, clients_for_chain
 
-        chain = load_failover_chain(
-            primary_label=f"主配置（{MODEL_NAME}）",
-            primary_client=client,
-            primary_base_url=BASE_URL or "",
-            primary_model_name=MODEL_NAME or "",
-        )
-        if chain:
-            return chain
+        items = resolve_failover_chain(**_failover_env_kwargs())
     except Exception as e:
-        safe_print(f"   [AI分析] 读取备用模型档案失败，仅使用主配置: {e}")
-    return [(f"主配置（{MODEL_NAME}）", client, MODEL_NAME)] if client else []
+        safe_print(f"   [AI分析] 读取模型档案失败，跳过分析: {e}")
+        return []
+    if not _is_failover_enabled():
+        items = items[:1]
+    return clients_for_chain(items)
 
 
 async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_urls=None):
@@ -466,8 +471,9 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
 
     优先使用图片 URL 直传（image_urls，中转处理快、不下载）；无 URL 时才回退本地 base64。
     """
-    if not client:
-        safe_print("   [AI分析] 错误：AI客户端未初始化，跳过分析。")
+    _model_chain = _build_failover_chain()
+    if not _model_chain:
+        safe_print("   [AI分析] 错误：没有可用的 AI 模型配置（档案和当前配置均为空），跳过分析。")
         return None
 
     item_info = product_data.get('商品信息', {})
@@ -687,8 +693,8 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
                     raise e
 
 
-    # ---- 故障转移：主配置失败后自动轮询启用的备用模型档案 ----
-    model_chain = _build_failover_chain()
+    # ---- 故障转移：首个模型失败后自动轮询下一个档案 ----
+    model_chain = _model_chain
     if len(model_chain) > 1:
         chain_desc = " -> ".join(label for label, _, _ in model_chain)
         safe_print(f"   [AI分析] 故障转移链（{len(model_chain)} 个模型）: {chain_desc}")

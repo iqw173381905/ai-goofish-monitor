@@ -1,14 +1,16 @@
 """
-AI 模型故障转移：当主模型调用持续失败时，自动轮询启用的备用模型档案。
+AI 模型故障转移：主模型持续失败时，自动轮询启用的备用模型档案。
 
-设计：
-- 主配置（当前 .env 生效的 OPENAI_*）永远是链上第一顺位。
-- 随后按 priority DESC、id ASC 轮询所有 enabled=1 的模型档案，
-  与主配置 base_url+model_name 完全相同的档案会被去重跳过。
-- 每个模型使用独立的 AsyncOpenAI 客户端，互不干扰。
+模型（没有"主配置"这种特殊概念，只有档案）：
+- 故障转移链 = [当前生效的档案] + [其余启用的档案按 priority 排序]。
+- "当前生效"指档案的 base_url + model_name 与当前生效配置（.env）一致的那条。
+- 生效配置没有对应档案时（比如手动改了 .env），链首为一条诚实的
+  "未存档配置"条目，并提示用户一键存为档案，而不是虚构一个"主配置"。
+- 档案不存在时（全新安装），回退到 .env 配置，保证总有一个可用模型。
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -18,6 +20,19 @@ from openai import AsyncOpenAI
 # 与 src/config.py 主客户端保持一致的传输层超时兜底（SDK 默认 600s 太长，
 # 曾导致单个商品 AI 分析卡满 10 分钟）。SDK 自带重试关闭，避免超时叠加。
 PROFILE_CLIENT_TIMEOUT = 120.0
+
+# 客户端缓存：每个商品分析都重建客户端会造成连接/文件描述符抖动，
+# 按 (档案 id, updated_at) 缓存，档案更新后自动失效重建。
+_client_cache: Dict[tuple, AsyncOpenAI] = {}
+_CLIENT_CACHE_MAX = 32
+
+
+def _norm_base_url(url: Any) -> str:
+    return (url or "").strip().rstrip("/")
+
+
+def _norm_model_name(name: Any) -> str:
+    return (name or "").strip()
 
 
 def _resolve_proxy_url(profile: Dict[str, Any]) -> Optional[str]:
@@ -36,7 +51,7 @@ def create_profile_client(profile: Dict[str, Any]) -> AsyncOpenAI:
         http_client = httpx.AsyncClient(proxy=proxy_url, trust_env=True)
     kwargs: Dict[str, Any] = {
         "api_key": profile.get("api_key") or "",
-        "base_url": (profile.get("base_url") or "").rstrip("/"),
+        "base_url": _norm_base_url(profile.get("base_url")),
         "timeout": PROFILE_CLIENT_TIMEOUT,
         "max_retries": 0,
     }
@@ -45,62 +60,127 @@ def create_profile_client(profile: Dict[str, Any]) -> AsyncOpenAI:
     return AsyncOpenAI(**kwargs)
 
 
-def _same_endpoint(base_url_a: str, model_a: str, base_url_b: str, model_b: str) -> bool:
-    return (base_url_a or "").rstrip("/") == (base_url_b or "").rstrip("/") and (
-        model_a or ""
-    ).strip() == (model_b or "").strip()
+def _close_client_quietly(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
 
 
-def build_model_chain(
+def _cache_key_for(item: Dict[str, Any]) -> tuple:
+    if item["kind"] == "profile":
+        return ("profile", item.get("id"), item.get("updated_at"))
+    digest = hashlib.sha256((item.get("api_key") or "").encode()).hexdigest()[:16]
+    return (
+        "unsaved",
+        item.get("base_url"),
+        item.get("model_name"),
+        digest,
+        item.get("proxy_url"),
+    )
+
+
+def get_cached_client(item: Dict[str, Any]) -> AsyncOpenAI:
+    """获取（或创建并缓存）条目对应的客户端。档案更新后缓存自动失效。"""
+    key = _cache_key_for(item)
+    client = _client_cache.get(key)
+    if client is None:
+        prefix_len = 2 if item["kind"] == "profile" else 1
+        prefix = key[:prefix_len]
+        for old_key in [k for k in _client_cache if k[:prefix_len] == prefix and k != key]:
+            _close_client_quietly(_client_cache.pop(old_key))
+        client = create_profile_client(item)
+        if len(_client_cache) >= _CLIENT_CACHE_MAX:
+            oldest = next(iter(_client_cache))
+            _close_client_quietly(_client_cache.pop(oldest))
+        _client_cache[key] = client
+    return client
+
+
+def find_active_profile(
+    profiles: List[Dict[str, Any]], env_base_url: str, env_model_name: str
+) -> Optional[Dict[str, Any]]:
+    """找到与当前生效配置一致的档案；没有则返回 None。"""
+    want_url = _norm_base_url(env_base_url)
+    want_model = _norm_model_name(env_model_name)
+    if not want_url or not want_model:
+        return None
+    for p in profiles or []:
+        if _norm_base_url(p.get("base_url")) == want_url and _norm_model_name(
+            p.get("model_name")
+        ) == want_model:
+            return p
+    return None
+
+
+def _profile_item(profile: Dict[str, Any], *, is_active: bool) -> Dict[str, Any]:
+    return {
+        "kind": "profile",
+        "id": profile.get("id"),
+        "name": profile.get("name") or f"档案{profile.get('id')}",
+        "base_url": _norm_base_url(profile.get("base_url")),
+        "api_key": profile.get("api_key") or "",
+        "model_name": _norm_model_name(profile.get("model_name")),
+        "proxy_url": (profile.get("proxy_url") or "").strip(),
+        "enabled": True,
+        "priority": int(profile.get("priority") or 0),
+        "updated_at": profile.get("updated_at"),
+        "is_active": is_active,
+    }
+
+
+def resolve_failover_chain(
     *,
-    primary_label: str,
-    primary_client: Any,
-    primary_base_url: str,
-    primary_model_name: str,
-    profiles: List[Dict[str, Any]],
-) -> List[Tuple[str, Any, str]]:
-    """构建故障转移链：[(显示名, 客户端, 模型名), ...]。
-
-    primary_client 可为 None（主配置缺失时），此时链只含启用的档案；
-    profiles 应已按 priority 排序（见 get_failover_profiles）。
-    """
-    chain: List[Tuple[str, Any, str]] = []
-    if primary_client is not None:
-        chain.append((primary_label, primary_client, primary_model_name))
-    for profile in profiles:
-        if not profile.get("model_name") or not profile.get("base_url"):
-            continue
-        if _same_endpoint(
-            primary_base_url,
-            primary_model_name,
-            profile.get("base_url") or "",
-            profile.get("model_name") or "",
-        ):
-            # 与主配置完全相同的档案跳过，避免重复打同一个模型
-            continue
-        label = f"{profile.get('name') or '档案'}（{profile.get('model_name')}）"
-        chain.append((label, create_profile_client(profile), profile["model_name"]))
-    return chain
-
-
-def load_failover_chain(
-    *,
-    primary_label: str = "主配置",
-    primary_client: Any = None,
-    primary_base_url: str = "",
-    primary_model_name: str = "",
+    env_base_url: str = "",
+    env_model_name: str = "",
+    env_api_key: str = "",
+    env_proxy: str = "",
     db_path: Optional[str] = None,
-) -> List[Tuple[str, Any, str]]:
-    """读取数据库中的启用档案并构建完整故障转移链。"""
+) -> List[Dict[str, Any]]:
+    """解析故障转移链的实际执行顺序（可序列化条目）。
+
+    [当前生效的档案] + [其余启用的档案按 priority]；生效配置无对应档案时，
+    首位为"未存档配置"条目；两者都没有时返回空列表。
+    """
     from src.infrastructure.persistence.sqlite_ai_profile_repository import (
         get_failover_profiles,
     )
 
     profiles = get_failover_profiles(db_path=db_path)
-    return build_model_chain(
-        primary_label=primary_label,
-        primary_client=primary_client,
-        primary_base_url=primary_base_url,
-        primary_model_name=primary_model_name,
-        profiles=profiles,
-    )
+    active = find_active_profile(profiles, env_base_url, env_model_name)
+    items: List[Dict[str, Any]] = []
+    if active is not None:
+        items.append(_profile_item(active, is_active=True))
+        rest = [p for p in profiles if p.get("id") != active.get("id")]
+    else:
+        if _norm_base_url(env_base_url) and _norm_model_name(env_model_name):
+            items.append(
+                {
+                    "kind": "unsaved",
+                    "id": 0,
+                    "name": "未存档配置",
+                    "base_url": _norm_base_url(env_base_url),
+                    "api_key": env_api_key or "",
+                    "model_name": _norm_model_name(env_model_name),
+                    "proxy_url": (env_proxy or "").strip(),
+                    "enabled": True,
+                    "priority": 0,
+                    "updated_at": None,
+                    "is_active": True,
+                }
+            )
+        rest = profiles
+    for p in rest:
+        items.append(_profile_item(p, is_active=False))
+    return items
+
+
+def clients_for_chain(items: List[Dict[str, Any]]) -> List[Tuple[str, Any, str]]:
+    """把链条目转成 (显示名, 客户端, 模型名) 三元组，供 ai_handler 调用。"""
+    chain: List[Tuple[str, Any, str]] = []
+    for it in items:
+        label = f"{it['name']}（{it['model_name']}）"
+        chain.append((label, get_cached_client(it), it["model_name"]))
+    return chain

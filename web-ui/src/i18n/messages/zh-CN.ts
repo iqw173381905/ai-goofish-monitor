@@ -306,6 +306,7 @@ const zhCN = {
       saveActiveHint: '当前生效的配置还没有保存为档案，点一下即可存档，避免重复手工录入。',
       saveActivePrompt: '请输入档案名称：',
       activeProfileDefaultName: '主配置',
+      failoverActualOrder: '实际尝试顺序：',
     },
     rotation: { saved: '轮换设置已保存', saveFailed: '轮换设置保存失败' },
     status: {

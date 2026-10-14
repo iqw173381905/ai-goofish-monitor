@@ -19,11 +19,11 @@ from src.infrastructure.persistence.sqlite_ai_profile_repository import (
     create_ai_profile,
     delete_ai_profile,
     get_ai_profile,
-    get_failover_profiles,
     list_ai_profiles,
     set_ai_profile_failover_order,
     update_ai_profile,
 )
+from src.services.ai_failover import resolve_failover_chain
 from src.services.ai_request_compat import (
     CHAT_COMPLETIONS_API_MODE,
     RESPONSES_API_MODE,
@@ -495,38 +495,37 @@ class AIFailoverOrderModel(BaseModel):
     ids: List[int] = Field(min_length=1)
 
 
+def _public_chain_item(item: dict) -> dict:
+    """链条目脱敏后返回给前端。"""
+    return {
+        "kind": item["kind"],
+        "id": item["id"],
+        "name": item["name"],
+        "base_url": item["base_url"],
+        "api_key_masked": _mask_api_key(item.get("api_key") or ""),
+        "model_name": item["model_name"],
+        "proxy_url": item.get("proxy_url") or "",
+        "enabled": item["enabled"],
+        "priority": item["priority"],
+        "is_active": item["is_active"],
+    }
+
+
 @router.get("/ai/failover-chain")
 async def get_ai_failover_chain():
-    """预览当前故障转移链：主配置 + 启用的备用档案（按 priority 排序）。"""
+    """预览当前故障转移链的实际执行顺序：[当前生效的档案] + [其余启用的档案按 priority]。"""
     from src.infrastructure.config.settings import AISettings
 
     settings = AISettings()
-    chain = []
-    if settings.is_configured():
-        chain.append(
-            {
-                "kind": "primary",
-                "id": 0,
-                "name": "主配置",
-                "base_url": settings.base_url,
-                "model_name": settings.model_name,
-                "enabled": True,
-            }
-        )
-    if settings.failover_enabled:
-        for profile in get_failover_profiles():
-            item = {"kind": "profile", **_profile_public(profile)}
-            # 与主配置完全相同的档案在实际调用时会被去重跳过，这里同样标记
-            if (profile.get("base_url") or "").rstrip("/") == (settings.base_url or "").rstrip(
-                "/"
-            ) and (profile.get("model_name") or "").strip() == (
-                settings.model_name or ""
-            ).strip():
-                item["skipped_as_duplicate"] = True
-            chain.append(item)
+    items = resolve_failover_chain(
+        env_base_url=settings.base_url or "",
+        env_model_name=settings.model_name or "",
+        env_api_key=settings.api_key or "",
+        env_proxy=env_manager.get_value("PROXY_URL", "") or "",
+    )
     return {
         "failover_enabled": settings.failover_enabled,
-        "chain": chain,
+        "chain": [_public_chain_item(it) for it in items],
     }
 
 

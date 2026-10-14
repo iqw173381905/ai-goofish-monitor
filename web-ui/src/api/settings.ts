@@ -240,13 +240,16 @@ export async function updateAiProfileFailoverOrder(ids: number[]): Promise<{ mes
 }
 
 export interface AiFailoverChainItem {
-  kind: 'primary' | 'profile'
+  kind: 'profile' | 'unsaved'
   id: number
   name: string
   base_url: string
+  api_key_masked?: string
   model_name: string
+  proxy_url?: string
   enabled: boolean
   priority?: number
+  is_active: boolean
 }
 
 export async function getAiFailoverChain(): Promise<{ failover_enabled: boolean; chain: AiFailoverChainItem[] }> {
