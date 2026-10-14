@@ -1481,7 +1481,41 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                                 item_data["浏览量"] = await safe_get(
                                     item_do, "browseCnt", default="-"
                                 )
-                                # ...[此处可添加更多从详情页解析出的商品信息]...
+
+                                # --- START: 提取结构化商品属性（品牌/型号/表径/功能等），供 AI 审核 ---
+                                # 详情页属性区为"标签：值"结构（如品牌：Apple/苹果），用 XPath
+                                # 定位"品牌"文本节点后向上找到同时包含"型号"的容器，再按标签正则提取。
+                                try:
+                                    _dom_attrs = await detail_page.evaluate(
+                                        """() => {
+                                            const out = {};
+                                            const labels = ['品牌','型号','表径','功能','成色','连接方式','颜色','尺寸','容量','版本'];
+                                            const xp = document.evaluate(
+                                                "//*[contains(text(), '品牌：') or contains(text(), '品牌:')]",
+                                                document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+                                            );
+                                            const node = xp.singleNodeValue;
+                                            if (!node) return out;
+                                            let el = node.parentElement, container = null;
+                                            while (el && el !== document.body) {
+                                                const t = el.innerText || '';
+                                                if (/型号\\s*[：:]/.test(t)) { container = el; break; }
+                                                el = el.parentElement;
+                                            }
+                                            const text = container ? (container.innerText || '') : '';
+                                            const labelAlt = labels.join('|');
+                                            for (const lb of labels) {
+                                            const m = text.match(new RegExp(lb + '\\s*[：:]\\s*([\\s\\S]*?)(?=(?:' + labelAlt + ')\\s*[：:]|$)'));
+                                            if (m && m[1].trim()) out[lb] = m[1].trim().replace(/\s+/g, ' ').slice(0, 120);
+                                            }
+                                            return out;
+                                        }"""
+                                    )
+                                    if isinstance(_dom_attrs, dict) and _dom_attrs:
+                                        item_data["商品属性"] = _dom_attrs
+                                except Exception as _attr_e:
+                                    log_time(f"提取商品属性失败（不影响主流程）: {_attr_e}")
+                                # --- END ---
 
                                 user_id = await safe_get(seller_do, "sellerId")
 

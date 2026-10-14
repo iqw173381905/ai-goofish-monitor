@@ -14,6 +14,7 @@ export interface ProductInfo {
   "商品图片列表"?: string[];
   "商品主图链接"?: string;
   "浏览量"?: string | number;
+  "商品属性"?: Record<string, string>;
 }
 
 export interface SellerInfo {
