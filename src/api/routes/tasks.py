@@ -17,7 +17,7 @@ from src.api.dependencies import (
     get_task_service,
 )
 from src.services.task_service import TaskService
-from src.services.process_service import ProcessService, TaskBusyError
+from src.services.process_service import ProcessService
 from src.services.scheduler_service import SchedulerService
 from src.services.task_generation_service import TaskGenerationService
 from src.services.task_generation_runner import (
@@ -492,10 +492,7 @@ async def start_task(
                 status_code=400,
                 detail="AI 分析标准正在生成中，请等待生成完成后再启动任务。",
             )
-    try:
-        success = await process_service.start_task(task_id, task.task_name)
-    except TaskBusyError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    success = await process_service.start_task(task_id, task.task_name)
     if not success:
         raise HTTPException(status_code=500, detail="启动任务失败")
     return {"message": f"任务 '{task.task_name}' 已启动"}

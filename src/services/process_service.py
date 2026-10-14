@@ -15,19 +15,12 @@ from src.ai_handler import send_ntfy_notification
 from src.config import STATE_FILE
 from src.failure_guard import FailureGuard
 from src.infrastructure.persistence.sqlite_task_repository import find_task_by_name_sync
+from src.services.shared_browser import SharedBrowserService, SHARED_BROWSER_WS_ENV
 from src.utils import build_task_log_path
 
 STOP_TIMEOUT_SECONDS = 20
 SPIDER_DEBUG_LIMIT_ENV = "SPIDER_DEBUG_LIMIT"
 LifecycleHook = Callable[[int], Awaitable[None] | None]
-
-
-class TaskBusyError(Exception):
-    """已有其他任务的爬虫进程在运行时抛出。
-
-    服务器只有 2GB 内存，单个 Chromium 就要占数百 MB，多浏览器并发极易
-    耗尽内存导致整机无响应，因此同一时间只允许一个任务运行。
-    """
 
 
 class ProcessService:
@@ -42,9 +35,12 @@ class ProcessService:
         self.failure_guard = FailureGuard()
         self._on_started: LifecycleHook | None = None
         self._on_stopped: LifecycleHook | None = None
-        # 启动互斥锁：防止调度器同时触发多个任务时，两个 start_task 交错执行
-        # 都通过"无运行中任务"检查、最终并发起两个浏览器（2026-10-14 实测发生过）。
+        # 启动互斥锁：保护 processes 字典的检查-注册竞态（2026-10-14 实测发生过
+        # 两个 start_task 交错执行）。注意：它只做互斥，不限制并发任务数量；
+        # 并发内存问题已由共享浏览器架构解决（多任务共用 1 个 Chromium）。
         self._start_lock = asyncio.Lock()
+        # 共享浏览器：多任务并发时共用 1 个 Chromium 进程，各任务只建独立 context。
+        self.shared_browser = SharedBrowserService()
 
     def set_lifecycle_hooks(
         self,
@@ -225,6 +221,14 @@ class ProcessService:
         child_env = os.environ.copy()
         child_env["PYTHONIOENCODING"] = "utf-8"
         child_env["PYTHONUTF8"] = "1"
+        # 共享浏览器：确保常驻 Chromium 在运行，把 ws_endpoint 传给子进程；
+        # 子进程连接后只建自己的 context。失败则不传变量，子进程回退到独立浏览器。
+        try:
+            ws_endpoint = await self.shared_browser.ensure_running()
+            child_env[SHARED_BROWSER_WS_ENV] = ws_endpoint
+            print(f"[共享浏览器] 任务 '{task_name}' 将连接共享浏览器")
+        except Exception as exc:
+            print(f"[共享浏览器] 启动失败（{exc}），任务 '{task_name}' 将使用独立浏览器")
         return await asyncio.create_subprocess_exec(
             *self._build_spawn_command(task_name),
             stdout=log_file_handle,
@@ -247,16 +251,6 @@ class ProcessService:
         self.task_names[task_id] = task_name
         self.exit_watchers[task_id] = asyncio.create_task(self._watch_process_exit(process))
 
-    def _running_task_names(self, exclude: int | None = None) -> list[str]:
-        """返回当前仍在运行的任务名（已结束但未清理的不算）。"""
-        names = []
-        for tid, process in self.processes.items():
-            if exclude is not None and tid == exclude:
-                continue
-            if process is not None and process.returncode is None:
-                names.append(self.task_names.get(tid, f"ID:{tid}"))
-        return names
-
     async def start_task(self, task_id: int, task_name: str) -> bool:
         """启动任务进程"""
         async with self._start_lock:
@@ -268,15 +262,8 @@ class ProcessService:
             print(f"任务 '{task_name}' (ID: {task_id}) 已在运行中")
             return False
 
-        # 2GB 内存单并发限制：已有其他任务在跑时拒绝启动，避免多 Chromium
-        # 并发耗尽内存导致整机无响应（2026-10-14 故障）。
-        for tid in list(self.processes.keys()):
-            if tid != task_id:
-                await self._drain_finished_process(tid)
-        busy = self._running_task_names(exclude=task_id)
-        if busy:
-            print(f"任务 '{task_name}' 跳过启动：已有任务 {busy} 正在运行（单并发内存保护）")
-            raise TaskBusyError(f"任务「{busy[0]}」正在运行中，请等待其完成后再启动")
+        # 注意：不再限制并发任务数量。多任务通过共享浏览器架构共用 1 个
+        # Chromium 进程（各任务独立 context），内存占用大幅下降。
 
         decision = self.failure_guard.should_skip_start(
             task_name,
@@ -450,3 +437,10 @@ class ProcessService:
         task_ids = list(self.processes.keys())
         for task_id in task_ids:
             await self.stop_task(task_id)
+
+    async def aclose(self) -> None:
+        """应用关闭时释放共享浏览器等资源。"""
+        try:
+            await self.shared_browser.close()
+        except Exception as exc:
+            print(f"[共享浏览器] 关闭异常: {exc}")

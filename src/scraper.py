@@ -48,6 +48,7 @@ from src.utils import (
 )
 from src.rotation import RotationPool, load_state_files, parse_proxy_pool, RotationItem
 from src.failure_guard import FailureGuard
+from src.services.shared_browser import SHARED_BROWSER_WS_ENV
 from src.services.account_strategy_service import resolve_account_runtime_plan
 from src.infrastructure.persistence.storage_names import build_result_filename
 from src.services.item_analysis_dispatcher import (
@@ -271,6 +272,20 @@ def prepare_chromium_launch_args() -> list[str]:
     crash_dumps_dir = os.path.join(tempfile.gettempdir(), CHROMIUM_CRASH_DUMPS_DIRNAME)
     os.makedirs(crash_dumps_dir, exist_ok=True)
     return build_chromium_launch_args(crash_dumps_dir)
+
+
+async def connect_shared_browser(p, ws_endpoint: str):
+    """连接应用内共享浏览器，失败时重试一次。
+
+    返回已连接的 browser。两次都失败则抛异常，调用方回退到独立 launch。
+    注意：返回的 browser 绝不能 close()，否则会关掉所有任务共用的浏览器。
+    """
+    try:
+        return await p.chromium.connect(ws_endpoint)
+    except Exception as first_err:
+        print(f"[共享浏览器] 首次连接失败（{first_err}），3 秒后重试一次…")
+    await asyncio.sleep(3)
+    return await p.chromium.connect(ws_endpoint)
 
 
 def _format_failure_reason(reason: str, limit: int = 500) -> str:
@@ -826,17 +841,36 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
             print(f"警告：读取登录状态文件失败，将直接按路径使用: {e}")
 
         async with async_playwright() as p:
-            launch_args = prepare_chromium_launch_args()
+            # 共享浏览器模式（Phase 2）：GOOFISH_SHARED_BROWSER_WS 由 ProcessService
+            # 在启动子进程前注入。连接成功后只创建本任务的独立 context（登录态、
+            # proxy 都在 context 级别隔离），任务结束只关 context，绝不关 browser。
+            # 无该环境变量时走原来的独立 launch 路径（本地调试用）。
+            shared_ws = os.environ.get(SHARED_BROWSER_WS_ENV, "").strip()
+            owns_browser = True
+            context_proxy = None
+            browser = None
+            if shared_ws:
+                try:
+                    browser = await connect_shared_browser(p, shared_ws)
+                    owns_browser = False
+                    if proxy_server:
+                        context_proxy = {"server": proxy_server}
+                    print("[共享浏览器] 已连接共享浏览器（本任务使用独立 context）")
+                except Exception as conn_err:
+                    print(f"[共享浏览器] 连接失败（{conn_err}），回退到独立浏览器模式")
+                    browser = None
+            if browser is None:
+                launch_args = prepare_chromium_launch_args()
 
-            launch_kwargs = {"headless": RUN_HEADLESS, "args": launch_args}
-            if proxy_server:
-                launch_kwargs["proxy"] = {"server": proxy_server}
+                launch_kwargs = {"headless": RUN_HEADLESS, "args": launch_args}
+                if proxy_server:
+                    launch_kwargs["proxy"] = {"server": proxy_server}
 
-            resolved_channel = _resolve_browser_channel()
-            if resolved_channel:
-                launch_kwargs["channel"] = resolved_channel
+                resolved_channel = _resolve_browser_channel()
+                if resolved_channel:
+                    launch_kwargs["channel"] = resolved_channel
 
-            browser = await p.chromium.launch(**launch_kwargs)
+                browser = await p.chromium.launch(**launch_kwargs)
 
             context_kwargs = _default_context_options()
             storage_state_arg = state_file
@@ -858,6 +892,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     storage_state_arg = snapshot_data
 
             context_kwargs = _clean_kwargs(context_kwargs)
+            if context_proxy:
+                # 共享浏览器模式：proxy 按任务落在各自 context 上（浏览器级无 proxy）
+                context_kwargs["proxy"] = context_proxy
             context = await browser.new_context(
                 storage_state=storage_state_arg, **context_kwargs
             )
@@ -1557,11 +1594,19 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 if analysis_dispatcher is not None:
                     log_time("等待后台分析任务完成...")
                     await analysis_dispatcher.join()
-                log_time("任务执行完毕，浏览器将在5秒后自动关闭...")
-                await asyncio.sleep(5)
-                if debug_limit:
-                    input("按回车键关闭浏览器...")
-                await browser.close()
+                if owns_browser:
+                    log_time("任务执行完毕，浏览器将在5秒后自动关闭...")
+                    await asyncio.sleep(5)
+                    if debug_limit:
+                        input("按回车键关闭浏览器...")
+                    await browser.close()
+                else:
+                    # 共享浏览器模式：只关闭本任务的 context，绝不关闭共享浏览器
+                    log_time("任务执行完毕，关闭本任务的浏览器上下文（共享浏览器保持运行）...")
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
 
         return processed_item_count
 
