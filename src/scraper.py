@@ -928,16 +928,34 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                     # 捕获初始搜索的API数据（在上下文内等待响应到达）
                     initial_response = await initial_response_info.value
 
-                # 等待页面加载出关键筛选元素，以确认已成功进入搜索结果页
-                try:
-                    await page.wait_for_selector("text=新发布", timeout=15000)
-                except PlaywrightTimeoutError as e:
-                    if _is_login_url(page.url):
-                        raise LoginRequiredError(
-                            "检测到登录状态已失效（页面跳转到闲鱼登录页），"
-                            "请到『设置 → 账号管理』页面重新登录后重试。"
-                        ) from e
-                    raise
+                # 等待页面加载出关键筛选元素，以确认已成功进入搜索结果页。
+                # 该元素偶发渲染超时（反爬/网络抖动），失败时刷新页面重试，
+                # 多次仍失败才按原逻辑抛错，避免一次抖动就记为任务失败。
+                _filter_ready = False
+                _last_filter_error: Exception | None = None
+                for _attempt in range(3):
+                    try:
+                        await page.wait_for_selector("text=新发布", timeout=15000)
+                        _filter_ready = True
+                        break
+                    except PlaywrightTimeoutError as e:
+                        _last_filter_error = e
+                        if _is_login_url(page.url):
+                            raise LoginRequiredError(
+                                "检测到登录状态已失效（页面跳转到闲鱼登录页），"
+                                "请到『设置 → 账号管理』页面重新登录后重试。"
+                            ) from e
+                        if _attempt < 2:
+                            log_time(
+                                f"筛选栏加载超时，第 {_attempt + 1}/3 次重试：刷新页面..."
+                            )
+                            await page.reload(
+                                wait_until="domcontentloaded", timeout=60000
+                            )
+                            await random_sleep(2, 4)
+                if not _filter_ready:
+                    assert _last_filter_error is not None
+                    raise _last_filter_error
 
                 # 模拟真实用户行为：页面加载后的初始停留和浏览
                 log_time("[反爬] 模拟用户查看页面...")
