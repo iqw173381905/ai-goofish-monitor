@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { 
   LayoutDashboard, 
   ListTodo, 
@@ -8,10 +8,20 @@ import {
   Layers, 
   Terminal, 
   Settings2,
-  ChevronRight
+  ChevronRight,
+  Smartphone
 } from 'lucide-vue-next'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useI18n } from 'vue-i18n'
+import { setMobilePref, isMobileDevice } from '@/router'
+
+const router = useRouter()
+// 仅手机设备显示：从电脑模式切回手机模式
+const showMobileSwitch = computed(() => isMobileDevice())
+function goMobile() {
+  setMobilePref('auto')
+  router.push('/m/tasks')
+}
 
 const emit = defineEmits<{
   (event: 'navigate'): void
@@ -76,6 +86,17 @@ const connectionTone = computed(() =>
         />
       </div>
     </RouterLink>
+
+    <!-- 切回手机模式（仅手机上显示） -->
+    <button
+      v-if="showMobileSwitch"
+      type="button"
+      @click="goMobile"
+      class="mt-6 mx-4 flex items-center justify-center gap-2 w-[calc(100%-2rem)] px-4 py-3 rounded-xl bg-primary/10 text-primary text-sm font-bold active:bg-primary/20 transition-colors"
+    >
+      <Smartphone class="w-5 h-5" />
+      切换到手机模式
+    </button>
 
     <!-- Support Section -->
     <div class="mt-12 px-4">
