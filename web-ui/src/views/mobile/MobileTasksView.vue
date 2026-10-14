@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { Play, Square, RefreshCcw, Loader2, Pencil, X, BrainCircuit, Clock } from 'lucide-vue-next'
 import { useTasks } from '@/composables/useTasks'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,27 @@ const {
   stoppingTaskIds,
   updateTask,
 } = useTasks()
+
+// cron 预设（和电脑端 TaskForm 一致）
+const EMPTY_CRON_VALUE = '__manual__'
+const cronPresets = computed(() => [
+  { value: EMPTY_CRON_VALUE, label: '手动触发' },
+  { value: '*/5 * * * *', label: '每 5 分钟' },
+  { value: '*/15 * * * *', label: '每 15 分钟' },
+  { value: '*/30 * * * *', label: '每 30 分钟' },
+  { value: '0 * * * *', label: '每小时' },
+  { value: '0 */2 * * *', label: '每 2 小时' },
+  { value: '0 */6 * * *', label: '每 6 小时' },
+  { value: '0 8 * * *', label: '每天 8 点' },
+  { value: '0 12 * * *', label: '每天 12 点' },
+  { value: '0 20 * * *', label: '每天 20 点' },
+])
+const isCustomCron = ref(false)
+
+function isPresetCronValue(v: string) {
+  if (!v) return true
+  return cronPresets.value.some((p) => p.value === v)
+}
 
 // 编辑弹窗状态
 const isEditOpen = ref(false)
@@ -42,8 +63,22 @@ const editForm = ref({
 // AI 标准重新生成
 const isRegenerating = ref(false)
 
+// 倒计时实时刷新（和电脑端一致：每秒更新）
+const nowMs = ref(Date.now())
+let countdownTimer: number | null = null
+
 onMounted(() => {
   fetchTasks()
+  countdownTimer = window.setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+})
+
+onBeforeUnmount(() => {
+  if (countdownTimer !== null) {
+    window.clearInterval(countdownTimer)
+    countdownTimer = null
+  }
 })
 
 async function handleToggle(task: any) {
@@ -69,6 +104,7 @@ function isKeywordMode(task: any) {
 
 function openEdit(task: Task) {
   editingTask.value = task
+  const cronVal = (task as any).cron || ''
   editForm.value = {
     task_name: task.task_name || '',
     keyword: task.keyword || '',
@@ -77,11 +113,13 @@ function openEdit(task: Task) {
     max_price: task.max_price != null ? String(task.max_price) : '',
     max_pages: (task as any).max_pages != null ? String((task as any).max_pages) : '',
     region: (task as any).region || '',
-    cron: (task as any).cron || '',
+    cron: cronVal,
     personal_only: !!(task as any).personal_only,
     free_shipping: !!(task as any).free_shipping,
     enabled: !!task.enabled,
   }
+  // 非预设的 cron 值 → 自定义模式
+  isCustomCron.value = !!cronVal && !isPresetCronValue(cronVal)
   isEditOpen.value = true
 }
 
@@ -165,7 +203,7 @@ function statusClass(task: any) {
 
 function scheduleText(task: any) {
   if (!task.cron) return '手动触发'
-  const cd = formatCountdown(task.next_run_at, Date.now())
+  const cd = formatCountdown(task.next_run_at, nowMs.value)
   if (cd) return `下次 ${cd}`
   const abs = formatNextRunAbsolute(task.next_run_at)
   return abs ? `下次 ${abs}` : task.cron
@@ -336,8 +374,32 @@ function scheduleText(task: any) {
           </div>
         </div>
         <div>
-          <Label class="text-sm font-bold">定时（cron，不填则手动）</Label>
-          <Input v-model="editForm.cron" class="mt-1 h-12 text-base font-mono" placeholder="如：0 */2 * * *" />
+          <Label class="text-sm font-bold">定时任务</Label>
+          <!-- 预设下拉 -->
+          <select
+            v-if="!isCustomCron"
+            :value="editForm.cron || EMPTY_CRON_VALUE"
+            @change="(e) => editForm.cron = (e.target as HTMLSelectElement).value === EMPTY_CRON_VALUE ? '' : (e.target as HTMLSelectElement).value"
+            class="mt-1 w-full h-12 text-base rounded-xl border border-slate-200 bg-white px-3"
+          >
+            <option v-for="p in cronPresets" :key="p.value" :value="p.value">
+              {{ p.label }}
+            </option>
+          </select>
+          <!-- 自定义输入 -->
+          <Input
+            v-else
+            v-model="editForm.cron"
+            class="mt-1 h-12 text-base font-mono"
+            placeholder="如：0 */2 * * *"
+          />
+          <button
+            type="button"
+            class="mt-1 text-xs text-primary font-bold"
+            @click="isCustomCron = !isCustomCron"
+          >
+            {{ isCustomCron ? '← 使用预设' : '自定义 cron →' }}
+          </button>
         </div>
         <div class="space-y-2">
           <div class="flex items-center justify-between py-1">

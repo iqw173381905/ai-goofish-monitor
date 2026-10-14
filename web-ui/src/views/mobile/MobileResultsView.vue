@@ -55,10 +55,10 @@ function itemOriginalPrice(it: any) {
   if (!v || ['暂无', '-', 'N/A', '价格异常'].includes(String(v).trim())) return ''
   return v
 }
-// 桌面端链接转手机端：www.goofish.com → m.goofish.com
+// 桌面端链接转手机端：www.goofish.com → h5.m.goofish.com
 function toMobileLink(url: string) {
   if (!url) return ''
-  return url.replace('://www.goofish.com', '://m.goofish.com')
+  return url.replace('://www.goofish.com', '://h5.m.goofish.com')
 }
 function itemLink(it: any) {
   return toMobileLink(getInfo(it)['商品链接'] || '')
