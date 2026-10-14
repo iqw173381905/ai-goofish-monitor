@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { RefreshCcw, ChevronDown, ArrowDown } from 'lucide-vue-next'
+import { RefreshCcw, ChevronDown } from 'lucide-vue-next'
 import { useTasks } from '@/composables/useTasks'
 import { getLogs } from '@/api/logs'
 import { toast } from '@/components/ui/toast'

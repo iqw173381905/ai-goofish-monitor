@@ -3,6 +3,7 @@ import { http } from '@/lib/http'
 export interface AccountItem {
   name: string
   path: string
+  valid?: boolean
 }
 
 export interface AccountDetail extends AccountItem {

@@ -70,9 +70,18 @@ async def list_accounts():
     accounts = []
     for filename in sorted(files):
         name = filename[:-5]
+        path = os.path.join(state_dir, filename)
+        # 登录态有效性：复用任务启动前的签名 token 过期检查（600s 缓冲），
+        # 供手机端账号页展示；检测失败时默认有效，避免误报。
+        try:
+            from src.scraper import check_state_file_login_valid
+            valid, _ = check_state_file_login_valid(path, buffer_seconds=600)
+        except Exception:
+            valid = True
         accounts.append({
             "name": name,
-            "path": os.path.join(state_dir, filename),
+            "path": path,
+            "valid": valid,
         })
     return accounts
 

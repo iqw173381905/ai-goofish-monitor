@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { RefreshCcw, UserCircle, CheckCircle2, XCircle, Loader2 } from 'lucide-vue-next'
+import { RefreshCcw, UserCircle, CheckCircle2, XCircle } from 'lucide-vue-next'
 import { listAccounts, type AccountItem } from '@/api/accounts'
-import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
 
 const accounts = ref<AccountItem[]>([])
 const isLoading = ref(false)
-const refreshingName = ref<string | null>(null)
 
 async function load() {
   isLoading.value = true
@@ -59,13 +57,13 @@ onMounted(load)
         <div class="flex-1 min-w-0">
           <h3 class="font-bold text-slate-800 text-sm truncate">{{ acc.name }}</h3>
           <p class="text-xs text-slate-400 mt-0.5">
-            {{ (acc as any).valid ? '登录有效' : '需重新登录' }}
+            {{ acc.valid === false ? '需重新登录' : '登录有效' }}
           </p>
         </div>
-        <CheckCircle2 v-if="(acc as any).valid" class="w-6 h-6 text-emerald-500 flex-shrink-0" />
+        <CheckCircle2 v-if="acc.valid !== false" class="w-6 h-6 text-emerald-500 flex-shrink-0" />
         <XCircle v-else class="w-6 h-6 text-rose-400 flex-shrink-0" />
       </div>
-      <p v-if="!(acc as any).valid" class="mt-2 text-xs text-slate-400">
+      <p v-if="acc.valid === false" class="mt-2 text-xs text-slate-400">
         请在电脑端账号管理中重新扫码登录
       </p>
     </article>
