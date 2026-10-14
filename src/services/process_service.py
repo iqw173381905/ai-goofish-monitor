@@ -52,11 +52,23 @@ class ProcessService:
             await result
 
     def _resolve_cookie_path(self, task_name: str) -> str | None:
-        """Best-effort cookie/state path for a task."""
+        """Best-effort cookie/state path for a task.
+
+        必须与 scraper 运行时实际选用的登录态文件一致（见
+        resolve_effective_state_path），否则 FailureGuard 记录失败时用的是
+        真实路径（如 state/acc_1.json），而启动检查时却用另一个路径，
+        导致「登录态已更新自动恢复」永远检测不到，任务被暂停后无法自愈。
+        """
         try:
+            from src.scraper import resolve_effective_state_path
+
             task = find_task_by_name_sync(task_name)
-            if task and isinstance(task.account_state_file, str) and task.account_state_file.strip():
-                return task.account_state_file.strip()
+            task_config = {
+                "account_state_file": task.account_state_file if task else None
+            }
+            state_path = resolve_effective_state_path(task_config)
+            if state_path and os.path.exists(state_path):
+                return state_path
         except Exception:
             pass
 
