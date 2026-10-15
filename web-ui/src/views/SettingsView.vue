@@ -403,7 +403,7 @@ watch(selectedPrompt, async (value) => {
             <CardHeader>
               <CardTitle>{{ t('settings.ai.profilesTitle') }}</CardTitle>
               <CardDescription>{{ t('settings.ai.profilesDescription') }}</CardDescription>
-              <div v-if="isReady && activeProfileId === null && aiSettings.OPENAI_BASE_URL && aiSettings.OPENAI_MODEL_NAME" class="mt-2">
+              <div v-if="isReady && aiProfiles.length > 0 && activeProfileId === null && aiSettings.OPENAI_BASE_URL && aiSettings.OPENAI_MODEL_NAME" class="mt-2">
                 <Button variant="outline" size="sm" :disabled="isSavingActiveProfile" @click="handleSaveActiveAsProfile">
                   {{ t('settings.ai.saveActiveAsProfile') }}
                 </Button>
@@ -510,7 +510,7 @@ watch(selectedPrompt, async (value) => {
             </CardFooter>
           </Card>
 
-          <Card>
+          <Card v-if="aiProfiles.length > 0">
             <CardHeader>
               <CardTitle>{{ t('settings.ai.title') }}</CardTitle>
               <CardDescription>{{ t('settings.ai.description') }}</CardDescription>
