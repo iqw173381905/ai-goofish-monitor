@@ -401,7 +401,51 @@ def main() -> None:
         else:
             log("闲鱼会话标记完整（unb/tracknick/sgcookie 均在）。")
 
+        # ---------- 6. 真实登录态校验：打开需要登录的页面，确认不是登录框 ----------
+        # cookie 存在不代表会话有效，闲鱼可能已在服务端作废会话。
+        log("正在验证真实登录态...")
+        login_valid = False
+        try:
+            verify_page = ctx.new_page()
+            verify_page.goto("https://www.goofish.com/", timeout=30000, wait_until="domcontentloaded")
+            verify_page.wait_for_timeout(5000)
+            page_text = ""
+            try:
+                page_text = verify_page.content()
+            except Exception:
+                pass
+            # 未登录特征：出现登录弹窗/登录按钮/扫码提示
+            login_indicators = ["登录", "扫码", "login", "Login"]
+            # 已登录特征：页面包含用户相关入口（发布、我的）
+            # 若页面明确出现登录框且无用户态特征，判定为未登录
+            has_login_popup = any(kw in page_text for kw in ["请登录", "登录/注册", "扫码登录", "login-button"])
+            # 更可靠：检查是否存在"发布闲鱼"按钮（仅登录用户可见）
+            has_publish_btn = False
+            try:
+                has_publish_btn = verify_page.locator("text=发布").count() > 0
+            except Exception:
+                pass
+            if has_login_popup and not has_publish_btn:
+                log("验证失败：页面显示登录框，会话已失效，需要手动重新扫码登录。")
+            elif has_publish_btn:
+                log("验证通过：已确认登录态有效。")
+                login_valid = True
+            else:
+                # 无法确定，保守起见认为有效（避免误报），但记录警告
+                log("警告：无法明确判断登录态（未发现登录框也未发现发布按钮），视为有效。")
+                login_valid = True
+            try:
+                verify_page.close()
+            except Exception:
+                pass
+        except Exception as exc:
+            log(f"验证登录态时出错: {exc}，视为有效（避免误报）。")
+            login_valid = True
+
         ctx.close()
+        if not login_valid:
+            log("续期失败：登录态已失效，请到『设置 → 账号管理』手动重新扫码登录。")
+            sys.exit(2)
         log("完成。可以在任务管理中重新启动任务验证。")
         sys.exit(0)
 
