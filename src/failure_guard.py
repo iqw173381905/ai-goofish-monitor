@@ -267,6 +267,14 @@ class FailureGuard:
         cookie_path: Optional[str] = None,
         now: Optional[datetime] = None,
     ) -> SkipDecision:
+        # 用户已要求去掉失败暂停限制：永不拦截启动，仅保留计数与通知
+        return SkipDecision(
+            skip=False,
+            should_notify=False,
+            reason="pause_disabled",
+            paused_until=None,
+            consecutive_failures=0,
+        )
         current = _now(self.tz_name, now=now)
         today = _today_str(self.tz_name, now=current)
 
