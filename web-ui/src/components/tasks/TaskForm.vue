@@ -212,8 +212,8 @@ function handleSubmit() {
     return
   }
 
-  const decisionMode = form.value.decision_mode || 'ai'
-  if (decisionMode === 'ai' && !String(form.value.description || '').trim()) {
+  const decisionMode = 'ai'
+  if (!String(form.value.description || '').trim()) {
     toast({
       title: t('tasks.form.validation.incomplete'),
       description: t('tasks.form.validation.aiDescriptionRequired'),
@@ -225,15 +225,7 @@ function handleSubmit() {
   const keywordRules = parseKeywordText(keywordRulesInput.value)
   const requiredKeywords = parseKeywordText(requiredKeywordsInput.value)
   const optionalKeywords = parseKeywordText(optionalKeywordsInput.value)
-  if (decisionMode === 'keyword' && requiredKeywords.length === 0 && optionalKeywords.length === 0 && keywordRules.length === 0) {
-    toast({
-      title: t('tasks.form.validation.keywordRuleIncomplete'),
-      description: t('tasks.form.validation.keywordRuleRequired'),
-      variant: 'destructive',
-    })
-    return
-  }
-  if (decisionMode === 'keyword' && optionalKeywords.length > 0 && optionalMinHitsInput.value != null && (optionalMinHitsInput.value < 1 || optionalMinHitsInput.value > optionalKeywords.length)) {
+  if (optionalKeywords.length > 0 && optionalMinHitsInput.value != null && (optionalMinHitsInput.value < 1 || optionalMinHitsInput.value > optionalKeywords.length)) {
     toast({
       title: t('tasks.form.validation.keywordRuleIncomplete'),
       description: t('tasks.form.validation.optionalMinHitsInvalid'),
@@ -277,23 +269,12 @@ function handleSubmit() {
   submitData.decision_mode = decisionMode
   submitData.account_strategy = currentAccountStrategy
   submitData.analyze_images = submitData.analyze_images !== false
-  if (decisionMode === 'keyword') {
-    submitData.keyword_rules = keywordRules
-    submitData.required_keywords = requiredKeywords
-    submitData.optional_keywords = optionalKeywords
-    submitData.optional_min_hits =
-      optionalKeywords.length > 0 ? (optionalMinHitsInput.value ?? null) : null
-  } else {
-    // AI 模式不提交关键词字段：后端 exclude_unset 会保留旧值，
-    // 这样从关键词 → AI → 再切回关键词时，之前填的词不会丢
-    delete submitData.keyword_rules
-    delete submitData.required_keywords
-    delete submitData.optional_keywords
-    delete submitData.optional_min_hits
-  }
-  if (decisionMode === 'keyword' && !submitData.description) {
-    submitData.description = ''
-  }
+  // AI 模式也提交关键词：用于商品预筛选（先过关键词，再调 AI）
+  submitData.keyword_rules = keywordRules
+  submitData.required_keywords = requiredKeywords
+  submitData.optional_keywords = optionalKeywords
+  submitData.optional_min_hits =
+    optionalKeywords.length > 0 ? (optionalMinHitsInput.value ?? null) : null
 
   emit('submit', submitData)
 }
@@ -311,20 +292,6 @@ function handleSubmit() {
         <Input id="keyword" v-model="form.keyword" class="sm:col-span-3" :placeholder="t('tasks.form.keywordPlaceholder')" required />
       </div>
       <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
-        <Label class="sm:text-right">{{ t('tasks.form.decisionMode') }}</Label>
-        <div class="sm:col-span-3">
-          <Select v-model="form.decision_mode">
-            <SelectTrigger>
-              <SelectValue :placeholder="t('tasks.form.decisionModePlaceholder')" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ai">{{ t('tasks.form.aiMode') }}</SelectItem>
-              <SelectItem value="keyword">{{ t('tasks.form.keywordMode') }}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="description" class="sm:text-right">{{ t('tasks.form.description') }}</Label>
         <div class="space-y-1 sm:col-span-3">
           <Textarea
@@ -332,9 +299,7 @@ function handleSubmit() {
             v-model="form.description"
             :placeholder="t('tasks.form.descriptionPlaceholder')"
           />
-          <p v-if="form.decision_mode === 'keyword'" class="text-xs text-gray-500">
-            {{ t('tasks.form.keywordDescriptionHint') }}
-          </p>
+
         </div>
       </div>
       <div v-if="form.decision_mode === 'ai'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
@@ -347,7 +312,7 @@ function handleSubmit() {
         </div>
       </div>
 
-      <div v-if="form.decision_mode === 'keyword'" class="grid gap-2 sm:grid-cols-4 sm:gap-4">
+      <div class="grid gap-2 sm:grid-cols-4 sm:gap-4">
         <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.requiredKeywords') }}</Label>
         <div class="space-y-2 sm:col-span-3">
           <p class="text-xs text-gray-500">
@@ -361,7 +326,7 @@ function handleSubmit() {
         </div>
       </div>
 
-      <div v-if="form.decision_mode === 'keyword'" class="grid gap-2 sm:grid-cols-4 sm:gap-4">
+      <div class="grid gap-2 sm:grid-cols-4 sm:gap-4">
         <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.optionalKeywords') }}</Label>
         <div class="space-y-2 sm:col-span-3">
           <p class="text-xs text-gray-500">
@@ -375,7 +340,7 @@ function handleSubmit() {
         </div>
       </div>
 
-      <div v-if="form.decision_mode === 'keyword'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="optional-min-hits" class="sm:text-right">{{ t('tasks.form.optionalMinHits') }}</Label>
         <div class="space-y-1 sm:col-span-3">
           <Input

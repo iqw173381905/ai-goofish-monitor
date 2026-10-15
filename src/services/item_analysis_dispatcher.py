@@ -98,7 +98,20 @@ class ItemAnalysisDispatcher:
             return self._build_keyword_result(job, record)
         if self._skip_ai_analysis:
             return self._build_skip_ai_result()
+        # AI 模式关键词预筛选：配置了关键词时先过关键词，不过则直接跳过 AI 分析
+        if self._has_keyword_prefilter(job):
+            prefilter_result = self._build_keyword_result(job, record)
+            if not prefilter_result.get("is_recommended"):
+                prefilter_result["reason"] = (
+                    f"关键词预筛选未通过，跳过 AI 分析：{prefilter_result.get('reason', '')}"
+                )
+                prefilter_result["analysis_source"] = "keyword_prefilter"
+                return prefilter_result
         return await self._run_ai_analysis(job, record)
+
+    @staticmethod
+    def _has_keyword_prefilter(job: ItemAnalysisJob) -> bool:
+        return bool(job.keyword_rules or job.required_keywords or job.optional_keywords)
 
     def _build_keyword_result(self, job: ItemAnalysisJob, record: dict) -> dict:
         search_text = build_search_text(record)

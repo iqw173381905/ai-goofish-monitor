@@ -73,6 +73,19 @@ class SchedulerService:
                 except ValueError as e:
                     print(f"  -> [警告] 任务 '{task.task_name}' 的 Cron 表达式无效: {e}")
 
+        # 每天凌晨 3 点：为所有 AI 模式任务重新生成分析标准
+        try:
+            self.scheduler.add_job(
+                self._regenerate_all_criteria,
+                trigger=build_cron_trigger("0 3 * * *", timezone=self.scheduler.timezone),
+                id="daily_criteria_regen",
+                name="Daily: regenerate AI criteria",
+                replace_existing=True,
+            )
+            print("  -> 已添加每日 AI 标准重生成任务 (0 3 * * *)")
+        except ValueError as e:
+            print(f"  -> [警告] 每日标准重生成任务添加失败: {e}")
+
         print("定时任务加载完成")
 
     async def _run_task(self, task_id: int, task_name: str):
@@ -80,3 +93,36 @@ class SchedulerService:
         print(f"定时任务触发: 正在为任务 '{task_name}' 启动爬虫...")
         # 并发不再受限：多任务通过共享浏览器架构共用 1 个 Chromium 进程
         await self.process_service.start_task(task_id, task_name)
+
+
+    async def _regenerate_all_criteria(self):
+        """每天为所有启用的 AI 模式任务重新生成分析标准。"""
+        print("[定时] 开始每日 AI 分析标准重生成...")
+        try:
+            from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
+            tasks = await SqliteTaskRepository().find_all()
+        except Exception as e:
+            print(f"[定时] 读取任务列表失败: {e}")
+            return
+        count = 0
+        for task in tasks:
+            try:
+                if not getattr(task, "enabled", False):
+                    continue
+                if (getattr(task, "decision_mode", "ai") or "ai") != "ai":
+                    continue
+                description = (getattr(task, "description", "") or "").strip()
+                keyword = (getattr(task, "keyword", "") or "").strip()
+                if not description or not keyword:
+                    continue
+                # 跳过正在生成中的，避免重复触发
+                if getattr(task, "criteria_generating", False):
+                    print(f"[定时] 任务 '{task.task_name}' 正在生成中，跳过")
+                    continue
+                from src.api.routes.tasks import _regenerate_criteria_in_background
+                _regenerate_criteria_in_background(task.id, keyword, description)
+                count += 1
+                print(f"[定时] 已触发任务 '{task.task_name}' 的标准重生成")
+            except Exception as e:
+                print(f"[定时] 任务 '{getattr(task, 'task_name', '?')}' 重生成触发失败: {e}")
+        print(f"[定时] 每日 AI 标准重生成触发完成，共 {count} 个任务")
