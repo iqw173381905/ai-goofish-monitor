@@ -452,8 +452,7 @@ def _failover_env_kwargs() -> dict:
 def _build_failover_chain():
     """构建 AI 故障转移链：[(显示名, 客户端, 模型名), ...]。
 
-    没有"主配置"这种特殊概念——链 = [当前生效的档案] + [其余启用的档案按 priority]。
-    生效配置没有对应档案时，首位是"未存档配置"（.env 当前值）。
+    没有"主配置"这种特殊概念——链只包含已保存的档案。
     开关关闭时只用首位模型（单模型模式）。
     """
     try:
@@ -475,7 +474,7 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text="", image_
     """
     _model_chain = _build_failover_chain()
     if not _model_chain:
-        safe_print("   [AI分析] 错误：没有可用的 AI 模型配置（档案和当前配置均为空），跳过分析。")
+        safe_print("   [AI分析] 错误：没有添加 AI 模型，请先在设置页添加模型档案，跳过分析。")
         return None
 
     item_info = product_data.get('商品信息', {})

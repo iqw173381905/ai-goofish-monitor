@@ -2,15 +2,12 @@
 AI 模型故障转移：主模型持续失败时，自动轮询启用的备用模型档案。
 
 模型（没有"主配置"这种特殊概念，只有档案）：
-- 故障转移链 = [当前生效的档案] + [其余启用的档案按 priority 排序]。
+- 故障转移链 = [与当前生效配置一致的档案（如有）] + [其余启用的档案按 priority 排序]。
 - "当前生效"指档案的 base_url + model_name 与当前生效配置（.env）一致的那条。
-- 生效配置没有对应档案时（比如手动改了 .env），链首为一条诚实的
-  "未存档配置"条目，并提示用户一键存为档案，而不是虚构一个"主配置"。
-- 档案不存在时（全新安装），回退到 .env 配置，保证总有一个可用模型。
+- 链只包含已保存的档案；没有任何档案时链为空，调用方应明确提示"没有添加 AI 模型"。
 """
 from __future__ import annotations
 
-import hashlib
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -70,16 +67,8 @@ def _close_client_quietly(client: Any) -> None:
 
 
 def _cache_key_for(item: Dict[str, Any]) -> tuple:
-    if item["kind"] == "profile":
-        return ("profile", item.get("id"), item.get("updated_at"))
-    digest = hashlib.sha256((item.get("api_key") or "").encode()).hexdigest()[:16]
-    return (
-        "unsaved",
-        item.get("base_url"),
-        item.get("model_name"),
-        digest,
-        item.get("proxy_url"),
-    )
+    # 链只包含已保存的档案；档案更新后缓存自动失效
+    return ("profile", item.get("id"), item.get("updated_at"))
 
 
 def get_cached_client(item: Dict[str, Any]) -> AsyncOpenAI:
@@ -87,9 +76,8 @@ def get_cached_client(item: Dict[str, Any]) -> AsyncOpenAI:
     key = _cache_key_for(item)
     client = _client_cache.get(key)
     if client is None:
-        prefix_len = 2 if item["kind"] == "profile" else 1
-        prefix = key[:prefix_len]
-        for old_key in [k for k in _client_cache if k[:prefix_len] == prefix and k != key]:
+        prefix = key[:2]
+        for old_key in [k for k in _client_cache if k[:2] == prefix and k != key]:
             _close_client_quietly(_client_cache.pop(old_key))
         client = create_profile_client(item)
         if len(_client_cache) >= _CLIENT_CACHE_MAX:
@@ -141,8 +129,8 @@ def resolve_failover_chain(
 ) -> List[Dict[str, Any]]:
     """解析故障转移链的实际执行顺序（可序列化条目）。
 
-    [当前生效的档案] + [其余启用的档案按 priority]；生效配置无对应档案时，
-    首位为"未存档配置"条目；两者都没有时返回空列表。
+    [与当前生效配置一致的档案（如有）] + [其余启用的档案按 priority 排序]。
+    链只包含已保存的档案；没有任何档案时返回空列表。
     """
     from src.infrastructure.persistence.sqlite_ai_profile_repository import (
         get_failover_profiles,
@@ -155,22 +143,6 @@ def resolve_failover_chain(
         items.append(_profile_item(active, is_active=True))
         rest = [p for p in profiles if p.get("id") != active.get("id")]
     else:
-        if _norm_base_url(env_base_url) and _norm_model_name(env_model_name):
-            items.append(
-                {
-                    "kind": "unsaved",
-                    "id": 0,
-                    "name": "未存档配置",
-                    "base_url": _norm_base_url(env_base_url),
-                    "api_key": env_api_key or "",
-                    "model_name": _norm_model_name(env_model_name),
-                    "proxy_url": (env_proxy or "").strip(),
-                    "enabled": True,
-                    "priority": 0,
-                    "updated_at": None,
-                    "is_active": True,
-                }
-            )
         rest = profiles
     for p in rest:
         items.append(_profile_item(p, is_active=False))
