@@ -176,7 +176,21 @@ def main() -> None:
         # cookie 统一从 acc_1.json 注入，避免 persistent context 的兼容性问题
         # 注意：headless 时用 --headless=new 强制使用完整版 Chromium 的新 headless 模式，
         # 避免 Playwright 去找未安装的 chromium_headless_shell
-        _args = ["--no-sandbox", "--disable-dev-shm-usage"]
+        import tempfile
+        _crash_dir = os.path.join(tempfile.gettempdir(), "chr_crash_refresh")
+        os.makedirs(_crash_dir, exist_ok=True)
+        _args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-web-security",
+            "--disable-breakpad",
+            "--disable-crash-reporter",
+            "--disable-features=IsolateOrigins,site-per-process,Crashpad",
+            f"--crash-dumps-dir={_crash_dir}",
+        ]
         if headless:
             _args.append("--headless=new")
         browser = p.chromium.launch(
