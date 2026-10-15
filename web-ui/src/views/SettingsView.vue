@@ -436,7 +436,7 @@ watch(selectedPrompt, async (value) => {
                     {{ t('settings.ai.delete') }}
                   </Button>
                 </div>
-                <div class="mt-2 border-t pt-4">
+                <div v-if="aiProfiles.length > 0" class="mt-2 border-t pt-4">
                   <Label class="text-sm font-medium">{{ t('settings.ai.failoverChainTitle') }}</Label>
                   <p class="mt-1 mb-3 text-xs text-gray-500">{{ t('settings.ai.failoverChainHint') }}</p>
                   <p v-if="failoverChainText" class="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-gray-600">
