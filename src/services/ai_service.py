@@ -47,8 +47,10 @@ class AIAnalysisService:
 
     def _validate_result(self, result: Dict) -> bool:
         """验证 AI 分析结果的格式"""
+        # prompt_version 只是版本标签，不影响判断逻辑：缺失时填默认值，不视为失败
+        if "prompt_version" not in result:
+            result["prompt_version"] = "unknown"
         required_fields = [
-            "prompt_version",
             "is_recommended",
             "reason",
             "risk_tags",

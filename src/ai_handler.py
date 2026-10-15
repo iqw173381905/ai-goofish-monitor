@@ -307,8 +307,10 @@ def encode_image_to_base64(image_path):
 
 def validate_ai_response_format(parsed_response):
     """验证AI响应的格式是否符合预期结构"""
+    # prompt_version 只是版本标签，不影响判断逻辑：缺失时填默认值，不视为失败
+    if "prompt_version" not in parsed_response:
+        parsed_response["prompt_version"] = "unknown"
     required_fields = [
-        "prompt_version",
         "is_recommended",
         "reason",
         "risk_tags",
