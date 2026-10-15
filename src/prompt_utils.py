@@ -27,11 +27,21 @@ META_PROMPT_TEMPLATE = """
 ```
 ---
 
-请现在开始生成全新的【分析标准】文本。请注意：
-1.  **只输出新生成的文本内容**，不要包含任何额外的解释、标题或代码块标记。
-2.  保留范例中的 `[V6.3 核心升级]`、`[V6.4 逻辑修正]` 等版本标记，这有助于保持格式一致性。
-3.  将范例中所有与 "MacBook" 相关的内容，替换为与用户需求商品相关的内容。
-4.  思考并生成针对新商品类型的“一票否决硬性原则”和“危险信号清单”。
+请现在开始生成。请注意输出格式要求：
+
+【第一部分：分析标准】
+只输出新生成的文本内容，不要包含任何额外的解释、标题或代码块标记。
+保留范例中的 `[V6.3 核心升级]`、`[V6.4 逻辑修正]` 等版本标记，这有助于保持格式一致性。
+将范例中所有与 "MacBook" 相关的内容，替换为与用户需求商品相关的内容。
+思考并生成针对新商品类型的“一票否决硬性原则”和“危险信号清单”。
+
+【第二部分：关键词】
+在分析标准文本结束后，另起一行输出以下三行标记（标记行本身保留）：
+[KEYWORDS_REQUIRED]
+每行一个必填关键词（商品标题/描述必须包含的词，如品牌、型号、关键规格），没有则留空
+[KEYWORDS_OPTIONAL]
+每行一个可选关键词（加分项，如成色、配件、版本特征），没有则留空
+[END]
 """
 
 ProgressCallback = Callable[[str, str], Awaitable[None]]
@@ -103,6 +113,39 @@ async def _close_ai_client(
         print(f"关闭 AI 客户端时出错: {close_error}")
         if active_error is None:
             raise
+
+
+def split_criteria_and_keywords(generated_text: str):
+    """从 AI 生成文本中分离分析标准与关键词。
+
+    返回 (criteria_text, required_keywords, optional_keywords)。
+    关键词段格式：
+        [KEYWORDS_REQUIRED]
+        每行一个
+        [KEYWORDS_OPTIONAL]
+        每行一个
+        [END]
+    """
+    text = generated_text or ""
+    required: list[str] = []
+    optional: list[str] = []
+    criteria = text
+    req_marker = "[KEYWORDS_REQUIRED]"
+    opt_marker = "[KEYWORDS_OPTIONAL]"
+    end_marker = "[END]"
+    if req_marker in text:
+        criteria, rest = text.split(req_marker, 1)
+        criteria = criteria.strip()
+        # rest 中 optional 部分
+        if opt_marker in rest:
+            req_part, rest2 = rest.split(opt_marker, 1)
+            opt_part = rest2.split(end_marker, 1)[0] if end_marker in rest2 else rest2
+        else:
+            req_part = rest.split(end_marker, 1)[0] if end_marker in rest else rest
+            opt_part = ""
+        required = [ln.strip() for ln in req_part.strip().splitlines() if ln.strip()]
+        optional = [ln.strip() for ln in opt_part.strip().splitlines() if ln.strip()]
+    return criteria, required, optional
 
 
 async def generate_criteria(

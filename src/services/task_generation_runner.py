@@ -7,7 +7,7 @@ from datetime import datetime
 import aiofiles
 
 from src.domain.models.task import TaskCreate, TaskGenerateRequest
-from src.prompt_utils import generate_criteria
+from src.prompt_utils import generate_criteria, split_criteria_and_keywords
 from src.services.scheduler_service import SchedulerService
 from src.services.task_generation_service import TaskGenerationService
 from src.services.task_service import TaskService
@@ -140,11 +140,15 @@ async def run_ai_generation_job(
         async def report_progress(step_key: str, message: str) -> None:
             await advance_job(generation_service, job_id, step_key, message)
 
-        generated_criteria = await generate_criteria(
+        generated_raw = await generate_criteria(
             user_description=req.description or "",
             reference_file_path="prompts/macbook_criteria.txt",
             progress_callback=report_progress,
         )
+        # 分离标准文本与 AI 生成的关键词，关键词回填到任务
+        generated_criteria, kw_required, kw_optional = split_criteria_and_keywords(generated_raw)
+        if kw_required or kw_optional:
+            print(f"[任务生成] AI 生成关键词：必填 {kw_required}，可选 {kw_optional}")
 
         await advance_job(
             generation_service,
@@ -156,6 +160,16 @@ async def run_ai_generation_job(
 
         if not _finalize_task_criteria(task_id, output_filename):
             raise RuntimeError("回填任务分析标准失败")
+        if kw_required or kw_optional:
+            import json as _json
+            with sqlite_connection() as conn:
+                conn.execute(
+                    "UPDATE tasks SET required_keywords_json = ?, optional_keywords_json = ? WHERE id = ?",
+                    (_json.dumps(kw_required, ensure_ascii=False),
+                     _json.dumps(kw_optional, ensure_ascii=False),
+                     task_id),
+                )
+                conn.commit()
 
         task = await task_service.get_task(task_id)
         await reload_scheduler(task_service, scheduler_service)

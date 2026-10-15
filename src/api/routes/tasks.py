@@ -26,7 +26,7 @@ from src.services.task_generation_runner import (
 )
 from src.services.task_payloads import serialize_task, serialize_tasks
 from src.domain.models.task import TaskCreate, TaskUpdate, TaskGenerateRequest
-from src.prompt_utils import generate_criteria
+from src.prompt_utils import generate_criteria, split_criteria_and_keywords
 from src.utils import resolve_task_log_path
 from src.services.account_strategy_service import normalize_account_strategy
 from src.infrastructure.persistence.storage_names import build_result_filename
@@ -112,19 +112,26 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
             print(f"[后台] AI 返回的分析标准为空 task={task_id}，跳过写入")
             _set_generating(False)
             return
+        # 分离标准文本与 AI 生成的关键词
+        import json as _json
+        criteria_text, kw_required, kw_optional = split_criteria_and_keywords(generated)
+        if kw_required or kw_optional:
+            print(f"[后台] AI 生成关键词：必填 {kw_required}，可选 {kw_optional}")
         try:
             os.makedirs("prompts", exist_ok=True)
             with open(output_filename, 'w', encoding='utf-8') as f:
-                f.write(generated)
-            # 写 DB（标准文件 + 清生成标记 + 记录生成时间），带重试兜底
+                f.write(criteria_text)
+            # 写 DB（标准文件 + 关键词 + 清生成标记 + 记录生成时间），带重试兜底
             written = False
             for attempt in range(3):
                 try:
                     with sqlite_connection() as conn:
                         conn.execute(
-                            "UPDATE tasks SET ai_prompt_criteria_file = ?, criteria_generating = 0, criteria_generating_since = NULL, criteria_generated_at = ? WHERE id = ?",
+                            "UPDATE tasks SET ai_prompt_criteria_file = ?, required_keywords_json = ?, optional_keywords_json = ?, criteria_generating = 0, criteria_generating_since = NULL, criteria_generated_at = ? WHERE id = ?",
                             (
                                 output_filename,
+                                _json.dumps(kw_required, ensure_ascii=False),
+                                _json.dumps(kw_optional, ensure_ascii=False),
                                 datetime.now().isoformat(timespec="seconds"),
                                 task_id,
                             ),
