@@ -295,7 +295,7 @@ const zhCN = {
       failoverSwitch: '失败自动切换备用模型',
       failoverSwitchHint: '开启后，主模型连续失败时自动按顺序尝试下面启用的备用模型档案。',
       failoverChainTitle: '故障转移顺序',
-      failoverChainHint: '主配置永远排第一顺位；备用模型按此顺序轮询。关闭的档案不会被自动尝试。',
+      failoverChainHint: '按此顺序依次尝试，上移/下移可自由调整。关闭的档案不会被自动尝试。',
       failoverParticipate: '参与故障转移',
       moveUp: '上移',
       moveDown: '下移',

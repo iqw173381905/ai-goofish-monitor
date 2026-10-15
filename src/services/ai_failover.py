@@ -2,8 +2,8 @@
 AI 模型故障转移：主模型持续失败时，自动轮询启用的备用模型档案。
 
 模型（没有"主配置"这种特殊概念，只有档案）：
-- 故障转移链 = [与当前生效配置一致的档案（如有）] + [其余启用的档案按 priority 排序]。
-- "当前生效"指档案的 base_url + model_name 与当前生效配置（.env）一致的那条。
+- 故障转移链 = 启用的档案按 priority 排序（用户自由调整顺序，没有"主配置"概念）。
+- "当前生效"仅是标记：档案的 base_url + model_name 与当前生效配置（.env）一致的那条。
 - 链只包含已保存的档案；没有任何档案时链为空，调用方应明确提示"没有添加 AI 模型"。
 """
 from __future__ import annotations
@@ -129,7 +129,8 @@ def resolve_failover_chain(
 ) -> List[Dict[str, Any]]:
     """解析故障转移链的实际执行顺序（可序列化条目）。
 
-    [与当前生效配置一致的档案（如有）] + [其余启用的档案按 priority 排序]。
+    启用的档案按 priority 排序（用户通过上移/下移自由调整）；
+    与当前生效配置一致的档案仅打 is_active 标记，不改变顺序。
     链只包含已保存的档案；没有任何档案时返回空列表。
     """
     from src.infrastructure.persistence.sqlite_ai_profile_repository import (
@@ -138,15 +139,11 @@ def resolve_failover_chain(
 
     profiles = get_failover_profiles(db_path=db_path)
     active = find_active_profile(profiles, env_base_url, env_model_name)
-    items: List[Dict[str, Any]] = []
-    if active is not None:
-        items.append(_profile_item(active, is_active=True))
-        rest = [p for p in profiles if p.get("id") != active.get("id")]
-    else:
-        rest = profiles
-    for p in rest:
-        items.append(_profile_item(p, is_active=False))
-    return items
+    active_id = active.get("id") if active else None
+    return [
+        _profile_item(p, is_active=(p.get("id") == active_id))
+        for p in profiles
+    ]
 
 
 def clients_for_chain(items: List[Dict[str, Any]]) -> List[Tuple[str, Any, str]]:

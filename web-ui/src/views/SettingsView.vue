@@ -195,11 +195,6 @@ function canMoveProfile(index: number, direction: -1 | 1): boolean {
   const list = orderedProfiles.value
   const target = index + direction
   if (target < 0 || target >= list.length) return false
-  const activeId = activeProfileId.value
-  if (activeId === null) return true
-  // 当前生效的档案固定排首位：它不动，别人也不能越过它
-  if (list[index]?.id === activeId) return false
-  if (target === 0) return false
   return true
 }
 
