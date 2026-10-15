@@ -93,15 +93,28 @@ def _regenerate_criteria_in_background(task_id: int, keyword: str, description: 
             try:
                 # 120 秒超时兜底：AI 中转站无响应/排队过久时主动失败，
                 # 避免 generating 状态无限期挂起（前端"生成中"永不结束）。
-                generated = loop.run_until_complete(
-                    asyncio.wait_for(
-                        generate_criteria(
-                            user_description=description,
-                            reference_file_path="prompts/macbook_criteria.txt",
-                        ),
-                        timeout=120,
-                    )
-                )
+                generated = None
+                last_err = None
+                for _attempt in range(3):
+                    try:
+                        generated = loop.run_until_complete(
+                            asyncio.wait_for(
+                                generate_criteria(
+                                    user_description=description,
+                                    reference_file_path="prompts/macbook_criteria.txt",
+                                ),
+                                timeout=300,
+                            )
+                        )
+                        break
+                    except Exception as e:
+                        last_err = e
+                        print(f"[后台] 生成尝试 {_attempt + 1}/3 失败 task={task_id}: {type(e).__name__} {e}")
+                        if _attempt < 2:
+                            import time as _time
+                            _time.sleep(5)
+                if generated is None:
+                    raise RuntimeError(f"3次尝试均失败: {last_err}")
             finally:
                 loop.close()
         except Exception as e:
