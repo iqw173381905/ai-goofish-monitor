@@ -201,10 +201,22 @@ async function handleMoveProfile(index: number, direction: -1 | 1) {
   const ids = list.map(p => p.id)
   const moving = ids.splice(index, 1)[0] as number
   ids.splice(target, 0, moving)
+  const newFirstId = ids[0] as number
+  const oldActiveId = activeProfileId.value
   try {
     await updateAiProfileFailoverOrder(ids)
     await loadAiProfiles()
-    notifySuccess(t('settings.ai.failoverOrderSaved'))
+    // 谁排第一谁就是"当前生效"：首位变化时自动应用该档案
+    if (newFirstId !== oldActiveId) {
+      await applyAiProfile(newFirstId)
+      const active = await getAiSettings()
+      aiSettings.value = { ...active }
+      systemStatus.value = await getSystemStatus()
+      await loadAiProfiles()
+      notifySuccess(t('settings.ai.applied', { name: list.find(p => p.id === newFirstId)?.name || '' }))
+    } else {
+      notifySuccess(t('settings.ai.failoverOrderSaved'))
+    }
   } catch (e) {
     notifyError(t('settings.ai.failoverOrderFailed'), (e as Error).message)
   }
