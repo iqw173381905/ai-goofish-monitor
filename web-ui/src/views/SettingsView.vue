@@ -145,12 +145,8 @@ const failoverChainText = computed(() =>
 )
 // 管理列表按实际执行顺序排：当前生效的档案置顶固定，其余按 priority
 const orderedProfiles = computed(() => {
-  const sorted = [...aiProfiles.value].sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.id - b.id)
-  if (activeProfileId.value == null) return sorted
-  const idx = sorted.findIndex(p => p.id === activeProfileId.value)
-  if (idx <= 0) return sorted
-  const [active] = sorted.splice(idx, 1)
-  return [active as AiProfile, ...sorted]
+  // 纯 priority 排序，不再强制"当前生效"排首位
+  return [...aiProfiles.value].sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.id - b.id)
 })
 
 async function handleToggleProfileFailover(profile: AiProfile, value: boolean) {
