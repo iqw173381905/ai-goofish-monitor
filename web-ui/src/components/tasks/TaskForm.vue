@@ -312,7 +312,7 @@ function handleSubmit() {
         </div>
       </div>
 
-      <div class="grid gap-2 sm:grid-cols-4 sm:gap-4">
+      <div v-if="props.mode === 'edit'" class="grid gap-2 sm:grid-cols-4 sm:gap-4">
         <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.requiredKeywords') }}</Label>
         <div class="space-y-2 sm:col-span-3">
           <p class="text-xs text-gray-500">
@@ -326,7 +326,7 @@ function handleSubmit() {
         </div>
       </div>
 
-      <div class="grid gap-2 sm:grid-cols-4 sm:gap-4">
+      <div v-if="props.mode === 'edit'" class="grid gap-2 sm:grid-cols-4 sm:gap-4">
         <Label class="pt-1 sm:pt-2 sm:text-right">{{ t('tasks.form.optionalKeywords') }}</Label>
         <div class="space-y-2 sm:col-span-3">
           <p class="text-xs text-gray-500">
@@ -340,7 +340,7 @@ function handleSubmit() {
         </div>
       </div>
 
-      <div class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+      <div v-if="props.mode === 'edit'" class="grid gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
         <Label for="optional-min-hits" class="sm:text-right">{{ t('tasks.form.optionalMinHits') }}</Label>
         <div class="space-y-1 sm:col-span-3">
           <Input
