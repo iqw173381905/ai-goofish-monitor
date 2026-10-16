@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onMounted, computed, ref } from 'vue'
-import { RefreshCcw, Bell, BrainCircuit, Server, TestTube2 } from 'lucide-vue-next'
+import { RefreshCcw, Bell, BrainCircuit, Server, TestTube2, Check } from 'lucide-vue-next'
 import { useSettings } from '@/composables/useSettings'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toast'
+import { getAiProfiles, applyAiProfile } from '@/api/settings'
 
 const {
   notificationSettings,
@@ -34,6 +35,51 @@ const channelLabels: Record<string, string> = {
 }
 
 const isTesting = ref(false)
+
+// AI 模型切换
+interface AiProfileItem {
+  id: number
+  name: string
+  model: string
+  enabled: boolean
+  priority: number
+}
+const aiProfiles = ref<AiProfileItem[]>([])
+const activeProfileId = ref<number | null>(null)
+const switchingProfile = ref(false)
+
+async function loadAiProfiles() {
+  try {
+    const res: any = await getAiProfiles()
+    const list: AiProfileItem[] = res.profiles ?? res ?? []
+    aiProfiles.value = list
+      .filter(p => p.enabled)
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.id - b.id)
+    // 优先级最高的即为当前生效
+    activeProfileId.value = aiProfiles.value.length ? aiProfiles.value[0]!.id : null
+  } catch (e) {
+    console.warn('加载 AI 模型列表失败', e)
+  }
+}
+
+async function switchAiProfile(profile: AiProfileItem) {
+  if (switchingProfile.value || profile.id === activeProfileId.value) return
+  switchingProfile.value = true
+  try {
+    await applyAiProfile(profile.id)
+    activeProfileId.value = profile.id
+    toast({ title: `已切换到 ${profile.name}` })
+    await fetchAll()
+  } catch (e) {
+    toast({ title: '切换失败', description: (e as Error).message, variant: 'destructive' })
+  } finally {
+    switchingProfile.value = false
+  }
+}
+
+onMounted(() => {
+  loadAiProfiles()
+})
 
 async function togglePcurl(value: boolean) {
   try {
@@ -157,6 +203,25 @@ async function handleTest() {
         <h2 class="text-sm font-black text-slate-800 inline-flex items-center gap-2 mb-3">
           <BrainCircuit class="w-4 h-4 text-primary" /> AI
         </h2>
+        <!-- 模型切换 -->
+        <div v-if="aiProfiles.length" class="mb-3">
+          <p class="text-xs text-slate-400 mb-2">当前生效模型（点击切换）</p>
+          <div class="space-y-1.5">
+            <button
+              v-for="p in aiProfiles"
+              :key="p.id"
+              @click="switchAiProfile(p)"
+              :disabled="switchingProfile"
+              class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs transition active:scale-[0.98]"
+              :class="p.id === activeProfileId
+                ? 'border-primary bg-primary/5 text-slate-800 font-bold'
+                : 'border-slate-200 text-slate-600'"
+            >
+              <span class="truncate">{{ p.name }} <span class="text-slate-400 font-normal">({{ p.model }})</span></span>
+              <Check v-if="p.id === activeProfileId" class="w-4 h-4 text-primary shrink-0" />
+            </button>
+          </div>
+        </div>
         <div class="space-y-1.5 text-xs text-slate-500">
           <div class="flex justify-between gap-2">
             <span class="shrink-0">模型</span>
@@ -167,7 +232,7 @@ async function handleTest() {
             <span class="font-bold text-slate-700 font-mono text-right break-all">{{ (aiSettings as any).OPENAI_BASE_URL || '-' }}</span>
           </div>
         </div>
-        <p class="text-xs text-slate-300 mt-3">修改 AI 参数请在电脑端配置</p>
+        <p class="text-xs text-slate-300 mt-3">修改其他 AI 参数请在电脑端配置</p>
       </section>
     </template>
   </div>
