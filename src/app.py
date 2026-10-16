@@ -63,9 +63,19 @@ async def _sync_task_runtime_status(task_id: int, is_running: bool) -> None:
     )
 
 
+async def _on_task_stopped(task_id: int) -> None:
+    await _sync_task_runtime_status(task_id, False)
+    # 任务完成后推送新增推荐商品（ntfy 等，不依赖前端轮询）
+    try:
+        from src.services.recommendation_notifier import notify_new_recommendations
+        await notify_new_recommendations(task_id)
+    except Exception as e:
+        print(f"[推荐推送] 任务 {task_id} 完成后推送失败: {e}")
+
+
 process_service.set_lifecycle_hooks(
     on_started=lambda task_id: _sync_task_runtime_status(task_id, True),
-    on_stopped=lambda task_id: _sync_task_runtime_status(task_id, False),
+    on_stopped=_on_task_stopped,
 )
 
 # 设置全局 ProcessService 实例供依赖注入使用
