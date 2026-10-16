@@ -69,7 +69,7 @@ DEFAULT_IMAGE_DOWNLOAD_CONCURRENCY = max(
 # 下载太多既慢又占用 token/流量，可用环境变量 IMAGE_DOWNLOAD_LIMIT 覆盖
 MAX_IMAGES_PER_PRODUCT = max(
     1,
-    _positive_int(os.getenv("IMAGE_DOWNLOAD_LIMIT", "2"), 2),
+    _positive_int(os.getenv("IMAGE_DOWNLOAD_LIMIT", "4"), 4),
 )
 
 # --- AI 分析图片压缩（Pillow） ---
