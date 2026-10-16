@@ -68,19 +68,28 @@ def _set_generating_flag(task_id: int, value: bool) -> None:
             time.sleep(0.5)
 
 
-def _regenerate_criteria_in_background(task_id: int, keyword: str, description: str) -> None:
+def _regenerate_criteria_in_background(
+    task_id: int, keyword: str, description: str, existing_criteria_file: str = ""
+) -> None:
     """后台重新生成 AI 分析标准：写 prompts 文件并更新 DB 的 ai_prompt_criteria_file。
 
     切换/更新 AI 模式时不再同步等待 AI 生成（SiliconFlow 生成标准较慢，
     曾导致 PATCH 保存长时间无响应），改为保存秒回、后台异步生成。
     生成期间置 criteria_generating=1，前端据此禁用启动并展示生成中状态。
+
+    文件名复用逻辑：任务改名时沿用旧的标准文件名，避免产生孤儿文件。
+    只有新任务（无旧文件）才按关键词生成文件名。
     """
     from datetime import datetime
 
-    safe_keyword = "".join(
-        c for c in keyword.lower().replace(' ', '_') if c.isalnum() or c in "_-"
-    ).rstrip()
-    output_filename = f"prompts/{safe_keyword}_criteria.txt"
+    # 复用旧文件名，避免任务改名后产生孤儿文件
+    if existing_criteria_file and existing_criteria_file.strip():
+        output_filename = existing_criteria_file.strip()
+    else:
+        safe_keyword = "".join(
+            c for c in keyword.lower().replace(' ', '_') if c.isalnum() or c in "_-"
+        ).rstrip()
+        output_filename = f"prompts/{safe_keyword}_criteria.txt"
 
     def _set_generating(value: bool) -> None:
         _set_generating_flag(task_id, value)
@@ -330,6 +339,7 @@ async def update_task(
                 task_id=task_id,
                 keyword=existing_task.keyword,
                 description=description_for_ai,
+                existing_criteria_file=getattr(existing_task, "ai_prompt_criteria_file", "") or "",
             )
         task = await service.update_task(task_id, task_update)
         await _reload_scheduler_if_needed(service, scheduler_service)
