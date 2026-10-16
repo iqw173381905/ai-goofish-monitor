@@ -76,9 +76,35 @@ class ItemAnalysisDispatcher:
         record = copy.deepcopy(job.final_record)
         item_data = record.get("商品信息", {}) or {}
         record["卖家信息"] = await self._load_seller_info(job)
-        record["ai_analysis"] = await self._build_analysis_result(job, record)
-        if await self._saver(record, job.keyword):
-            self.completed_count += 1
+        # 两阶段：关键词先行判断并立即保存展示，AI 成功后再替换
+        keyword_result = None
+        if job.decision_mode != "keyword" and self._has_keyword_prefilter(job):
+            keyword_result = self._build_keyword_result(job, record)
+            matched = keyword_result.get("matched_keywords", [])
+            passed = keyword_result.get("is_recommended", False)
+            print(
+                f"   [关键词] {'推荐' if passed else '不推荐'}，"
+                f"命中: {matched if matched else '无'}，已先行保存；等待 AI 复核..."
+            )
+            record["ai_analysis"] = keyword_result
+            if await self._saver(record, job.keyword):
+                self.completed_count += 1
+        # AI 判断（跳过重复的关键词预检）
+        ai_result = await self._build_analysis_result(job, record, skip_prefilter=True)
+        if ai_result.get("analysis_source") == "ai" and "error" not in ai_result:
+            # AI 成功：替换关键词结果
+            print("   [AI] 分析成功，已替换关键词判断结果")
+            record["ai_analysis"] = ai_result
+            if await self._saver(record, job.keyword):
+                if keyword_result is None:
+                    self.completed_count += 1
+        elif keyword_result is None:
+            # 无关键词预检：保存 AI 结果（即使失败）
+            record["ai_analysis"] = ai_result
+            if await self._saver(record, job.keyword):
+                self.completed_count += 1
+        else:
+            print("   [AI] 分析失败，保留关键词判断结果")
         await self._notify_if_recommended(item_data, record["ai_analysis"])
 
     async def _load_seller_info(self, job: ItemAnalysisJob) -> dict:
@@ -93,13 +119,16 @@ class ItemAnalysisDispatcher:
         merged["卖家注册时长"] = job.registration_duration_text
         return merged
 
-    async def _build_analysis_result(self, job: ItemAnalysisJob, record: dict) -> dict:
+    async def _build_analysis_result(
+        self, job: ItemAnalysisJob, record: dict, skip_prefilter: bool = False
+    ) -> dict:
         if job.decision_mode == "keyword":
             return self._build_keyword_result(job, record)
         if self._skip_ai_analysis:
             return self._build_skip_ai_result()
         # 关键词预检（仅记录结果，不拦截）：不管过不过，最终都走 AI 判断
-        if self._has_keyword_prefilter(job):
+        # 注：_process_job 已先行做过关键词判断并保存，此处 skip_prefilter=True 时跳过重复计算
+        if not skip_prefilter and self._has_keyword_prefilter(job):
             prefilter_result = self._build_keyword_result(job, record)
             matched = prefilter_result.get("matched_keywords", [])
             passed = prefilter_result.get("is_recommended", False)
