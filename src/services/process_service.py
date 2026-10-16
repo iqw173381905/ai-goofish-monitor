@@ -130,11 +130,23 @@ class ProcessService:
             await self._notify_login_expired(task_name, msg)
             return False
 
+        # 续期复用共享浏览器：把 CDP endpoint 传给续期子进程，避免它再起一个
+        # Chromium 进程跟任务抢内存（2GB 机器上曾导致 Page crashed）。
+        # 共享浏览器不可用时不传变量，续期脚本回退到独立浏览器。
+        refresh_env = os.environ.copy()
+        try:
+            cdp_url = await self.shared_browser.ensure_running()
+            refresh_env[SHARED_BROWSER_CDP_ENV] = cdp_url
+            print(f"[登录续期] 续期将复用共享浏览器")
+        except Exception as exc:
+            print(f"[登录续期] 共享浏览器不可用（{exc}），续期使用独立浏览器")
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, script, "--auto-only", "--headless",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                env=refresh_env,
             )
             try:
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=180)

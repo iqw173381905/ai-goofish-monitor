@@ -193,10 +193,24 @@ def main() -> None:
         ]
         if headless:
             _args.append("--headless=new")
-        browser = p.chromium.launch(
-            headless=False,
-            args=_args,
-        )
+        # 优先复用应用内的共享浏览器（CDP 连接，只建独立 context，不新增进程）；
+        # 环境变量由 ProcessService 在启动续期子进程时传入。
+        # 注意：脚本内只 ctx.close()、从不 browser.close()，退出时仅断开 CDP 连接，
+        # 不会把共享浏览器杀掉。
+        shared_cdp = os.environ.get("GOOFISH_SHARED_BROWSER_CDP", "").strip()
+        use_shared = False
+        if shared_cdp:
+            try:
+                browser = p.chromium.connect_over_cdp(shared_cdp)
+                use_shared = True
+                log(f"已连接共享浏览器 {shared_cdp}，复用其进程续期")
+            except Exception as exc:
+                log(f"连接共享浏览器失败（{exc}），回退到独立浏览器")
+        if not use_shared:
+            browser = p.chromium.launch(
+                headless=False,
+                args=_args,
+            )
         ctx = browser.new_context(
             viewport={"width": 1280, "height": 800},
             locale="zh-CN",
