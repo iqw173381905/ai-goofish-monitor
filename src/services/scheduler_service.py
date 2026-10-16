@@ -9,6 +9,7 @@ from typing import List
 from src.core.cron_utils import build_cron_trigger
 from src.domain.models.task import Task
 from src.services.process_service import ProcessService
+from src.infrastructure.persistence.sqlite_connection import sqlite_connection
 
 
 class SchedulerService:
@@ -77,6 +78,39 @@ class SchedulerService:
 
     async def _run_task(self, task_id: int, task_name: str):
         """执行定时任务"""
+        # AI 标准生成中时跳过本次定时触发，避免用旧标准跑任务。
+        # stale 判定与手动启动保持一致：超过 10 分钟视为 worker 卡死，放行。
+        try:
+            with sqlite_connection() as conn:
+                row = conn.execute(
+                    "SELECT criteria_generating, criteria_generating_since, decision_mode FROM tasks WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+            if row:
+                generating = bool(row[0])
+                if generating and (row[2] or "ai") == "ai":
+                    stale = True
+                    if row[1]:
+                        try:
+                            since_dt = datetime.fromisoformat(row[1])
+                            stale = (datetime.now() - since_dt).total_seconds() > 600
+                        except (ValueError, TypeError):
+                            stale = True
+                    if not stale:
+                        print(f"定时任务跳过: 任务 '{task_name}' 的 AI 标准正在生成中，本轮不启动")
+                        return
+                    # stale：清标记后放行（与手动启动一致）
+                    try:
+                        with sqlite_connection() as conn:
+                            conn.execute(
+                                "UPDATE tasks SET criteria_generating = 0, criteria_generating_since = NULL WHERE id = ?",
+                                (task_id,),
+                            )
+                            conn.commit()
+                    except Exception as e:
+                        print(f"清除卡死的生成标记失败 task={task_id}: {e}")
+        except Exception as e:
+            print(f"检查生成状态失败 task={task_id}，继续执行: {e}")
         print(f"定时任务触发: 正在为任务 '{task_name}' 启动爬虫...")
         # 并发不再受限：多任务通过共享浏览器架构共用 1 个 Chromium 进程
         await self.process_service.start_task(task_id, task_name)
