@@ -1,4 +1,5 @@
 import asyncio
+import types
 
 import pytest
 
@@ -111,3 +112,93 @@ def test_generate_criteria_closes_ai_client_after_ai_failure(monkeypatch, tmp_pa
         asyncio.run(prompt_utils.generate_criteria("need a gpu", str(reference_file)))
 
     assert close_state["closed"] is True
+
+
+class _FakeRawCompletions:
+    def __init__(self, text=None, exc=None):
+        self.text = text
+        self.exc = exc
+
+    async def create(self, **kwargs):
+        if self.exc is not None:
+            raise self.exc
+        message = types.SimpleNamespace(content=self.text)
+        return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
+
+
+def _fake_chain_client(text=None, exc=None):
+    return types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=_FakeRawCompletions(text, exc))
+    )
+
+
+def test_generate_criteria_uses_failover_chain_first(monkeypatch, tmp_path):
+    """有档案链时走链，不再构造旧的 .env 默认 AIClient。"""
+    reference_file = tmp_path / "reference.txt"
+    reference_file.write_text("reference", encoding="utf-8")
+    chain = [("gpt-4o档案", _fake_chain_client(text="chain criteria"), "gpt-4o")]
+    monkeypatch.setattr(prompt_utils, "_resolve_criteria_failover_chain", lambda: chain)
+
+    def _no_legacy_client(*_args, **_kwargs):
+        raise AssertionError("legacy AIClient must not be constructed when chain exists")
+
+    monkeypatch.setattr(prompt_utils, "AIClient", _no_legacy_client)
+
+    result = asyncio.run(
+        prompt_utils.generate_criteria("need a watch", str(reference_file))
+    )
+    assert result == "chain criteria"
+
+
+def test_generate_criteria_fails_over_to_next_profile(monkeypatch, tmp_path):
+    """首个档案失败时自动转移到下一个档案。"""
+    reference_file = tmp_path / "reference.txt"
+    reference_file.write_text("reference", encoding="utf-8")
+    chain = [
+        ("档案A", _fake_chain_client(exc=TimeoutError("boom")), "model-a"),
+        ("档案B", _fake_chain_client(text="from backup"), "model-b"),
+    ]
+    monkeypatch.setattr(prompt_utils, "_resolve_criteria_failover_chain", lambda: chain)
+
+    result = asyncio.run(
+        prompt_utils.generate_criteria("need a watch", str(reference_file))
+    )
+    assert result == "from backup"
+
+
+def test_generate_criteria_chain_all_fail_raises_last_error(monkeypatch, tmp_path):
+    """链上全部失败时抛出最后一个异常。"""
+    reference_file = tmp_path / "reference.txt"
+    reference_file.write_text("reference", encoding="utf-8")
+    chain = [
+        ("档案A", _fake_chain_client(exc=TimeoutError("first")), "model-a"),
+        ("档案B", _fake_chain_client(exc=ValueError("second")), "model-b"),
+    ]
+    monkeypatch.setattr(prompt_utils, "_resolve_criteria_failover_chain", lambda: chain)
+
+    with pytest.raises(ValueError, match="second"):
+        asyncio.run(prompt_utils.generate_criteria("need a watch", str(reference_file)))
+
+
+def test_generate_criteria_falls_back_to_legacy_when_chain_empty(monkeypatch, tmp_path):
+    """链为空时回退到旧的 .env 默认配置路径。"""
+    reference_file = tmp_path / "reference.txt"
+    reference_file.write_text("reference", encoding="utf-8")
+
+    class FakeAIClient:
+        def is_available(self):
+            return True
+
+        async def _call_ai(self, *_args, **_kwargs):
+            return "legacy criteria"
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(prompt_utils, "_resolve_criteria_failover_chain", lambda: [])
+    monkeypatch.setattr(prompt_utils, "AIClient", FakeAIClient)
+
+    result = asyncio.run(
+        prompt_utils.generate_criteria("need a watch", str(reference_file))
+    )
+    assert result == "legacy criteria"

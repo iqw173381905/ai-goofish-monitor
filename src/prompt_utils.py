@@ -115,6 +115,93 @@ async def _close_ai_client(
             raise
 
 
+def _resolve_criteria_failover_chain():
+    """解析"重新生成 AI 标准"用的模型链：[(显示名, 客户端, 模型名), ...]。
+
+    与商品分析共用同一套档案链（启用的档案按 priority 排序），因此设置页的
+    排序/切换对重新生成同样生效；任一环节失败或链为空时返回 []，
+    调用方回退到旧的 .env 默认配置路径。
+    """
+    try:
+        from src.services.ai_failover import clients_for_chain, resolve_failover_chain
+    except Exception as exc:
+        print(f"[标准生成] 故障转移模块不可用，回退默认 AI 配置: {exc}")
+        return []
+    try:
+        items = resolve_failover_chain(
+            env_base_url=os.getenv("OPENAI_BASE_URL") or "",
+            env_model_name=os.getenv("OPENAI_MODEL_NAME") or "",
+            env_api_key=os.getenv("OPENAI_API_KEY") or "",
+            env_proxy=os.getenv("PROXY_URL") or "",
+        )
+    except Exception as exc:
+        print(f"[标准生成] 读取模型档案失败，回退默认 AI 配置: {exc}")
+        return []
+    if os.getenv("AI_FAILOVER_ENABLED", "true").strip().lower() != "true":
+        items = items[:1]
+    if not items:
+        return []
+    try:
+        return clients_for_chain(items)
+    except Exception as exc:
+        print(f"[标准生成] 构建档案客户端失败，回退默认 AI 配置: {exc}")
+        return []
+
+
+async def _request_text_via_profile(client, model_name: str, prompt: str) -> str:
+    """用单个档案客户端做一次纯文本生成，参数口径与 AIClient._call_ai 一致。"""
+    from src.services.ai_request_compat import (
+        CHAT_COMPLETIONS_API_MODE,
+        build_ai_request_params,
+        create_ai_response_async,
+    )
+    from src.services.ai_response_parser import extract_ai_response_content
+
+    request_params = build_ai_request_params(
+        CHAT_COMPLETIONS_API_MODE,
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.5,
+        max_output_tokens=CRITERIA_MAX_OUTPUT_TOKENS,
+        enable_json_output=False,
+    )
+    response = await create_ai_response_async(
+        client, CHAT_COMPLETIONS_API_MODE, request_params
+    )
+    return extract_ai_response_content(response)
+
+
+async def _generate_text_via_chain(chain, prompt: str) -> str:
+    """按档案链顺序逐个尝试生成分析标准，首个成功即返回。
+
+    超时/报错直接故障转移到下一个档案；空响应则对同一档案重试一次。
+    全部失败时抛出最后一个异常。
+    """
+    from src.services.ai_response_parser import EmptyAIResponseError
+
+    last_error: BaseException | None = None
+    for label, client, model_name in chain:
+        for attempt in range(2):
+            try:
+                print(f"[标准生成] 使用模型档案 {label}（第 {attempt + 1} 次）")
+                generated_text = await _request_text_via_profile(
+                    client, model_name, prompt
+                )
+                result = _strip_reasoning_blocks(generated_text)
+            except EmptyAIResponseError as exc:
+                print(f"[标准生成] {label} 返回空响应，重试: {exc}")
+                last_error = exc
+                continue
+            except Exception as exc:
+                print(f"[标准生成] {label} 调用失败，故障转移到下一个档案: {exc}")
+                last_error = exc
+                break
+            print("[标准生成] AI已成功生成内容。")
+            return result
+    assert last_error is not None  # 链非空时至少有一次尝试
+    raise last_error
+
+
 def split_criteria_and_keywords(generated_text: str):
     """从 AI 生成文本中分离分析标准与关键词。
 
@@ -156,6 +243,25 @@ async def generate_criteria(
     """
     Generates a new criteria file content using AI.
     """
+    await _report_progress(progress_callback, "reference", "正在读取参考文件。")
+    print(f"正在读取参考文件: {reference_file_path}")
+    reference_text = _read_reference_text(reference_file_path)
+
+    await _report_progress(progress_callback, "prompt", "正在构建发送给 AI 的指令。")
+    print("正在构建发送给AI的指令...")
+    prompt = META_PROMPT_TEMPLATE.format(
+        reference_text=reference_text,
+        user_description=user_description,
+    )
+
+    await _report_progress(progress_callback, "llm", "正在调用 AI 生成分析标准。")
+    chain = _resolve_criteria_failover_chain()
+    if chain:
+        # 与商品分析走同一套档案链：设置页的排序/切换对"重新生成"同样生效，
+        # 首个档案失败时自动故障转移到下一个，不再固定走 .env 默认配置。
+        return await _generate_text_via_chain(chain, prompt)
+
+    # 回退：无档案或故障转移不可用时，沿用旧的 .env 默认配置路径。
     ai_client = AIClient()
     active_error: BaseException | None = None
     try:
@@ -164,18 +270,6 @@ async def generate_criteria(
         if not ai_client.is_available():
             raise RuntimeError("AI客户端未初始化，无法生成分析标准。请检查.env配置。")
 
-        await _report_progress(progress_callback, "reference", "正在读取参考文件。")
-        print(f"正在读取参考文件: {reference_file_path}")
-        reference_text = _read_reference_text(reference_file_path)
-
-        await _report_progress(progress_callback, "prompt", "正在构建发送给 AI 的指令。")
-        print("正在构建发送给AI的指令...")
-        prompt = META_PROMPT_TEMPLATE.format(
-            reference_text=reference_text,
-            user_description=user_description,
-        )
-
-        await _report_progress(progress_callback, "llm", "正在调用 AI 生成分析标准。")
         return await _request_generated_text(ai_client, prompt)
     except Exception as exc:
         active_error = exc
