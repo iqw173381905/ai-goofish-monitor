@@ -493,7 +493,15 @@ async def start_task(
     if not task.enabled:
         raise HTTPException(status_code=400, detail="任务已被禁用，无法启动")
     if task.is_running:
-        raise HTTPException(status_code=400, detail="任务已在运行中")
+        # stale 检测：DB 显示运行中，但内存中无实际进程（进程已死/容器重启过），
+        # 视为僵尸状态，清标记后放行，避免"已在运行中"卡死无法启动。
+        if not process_service.is_running(task_id):
+            print(f"[启动] 检测到僵尸运行状态 task={task_id}，清除后放行")
+            await task_service.update_task_status(task_id, False)
+            # 刷新 task 对象
+            task = await task_service.get_task(task_id)
+        else:
+            raise HTTPException(status_code=400, detail="任务已在运行中")
     if (task.decision_mode or "ai") == "ai" and getattr(
         task, "criteria_generating", False
     ):
