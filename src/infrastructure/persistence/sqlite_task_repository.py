@@ -20,6 +20,7 @@ def _row_to_task(row) -> Task:
     payload["personal_only"] = bool(payload["personal_only"])
     payload["free_shipping"] = bool(payload["free_shipping"])
     payload["is_running"] = bool(payload["is_running"])
+    payload["schedule_paused"] = bool(payload.get("schedule_paused", False))
     payload["keyword_rules"] = json.loads(payload.pop("keyword_rules_json") or "[]")
     payload["required_keywords"] = json.loads(
         payload.pop("required_keywords_json", None) or "[]"
@@ -128,7 +129,8 @@ class SqliteTaskRepository(TaskRepository):
                         required_keywords_json = :required_keywords_json,
                         optional_keywords_json = :optional_keywords_json,
                         optional_min_hits = :optional_min_hits,
-                        is_running = :is_running
+                        is_running = :is_running,
+                        schedule_paused = :schedule_paused
                     WHERE id = :id
                     """,
                     payload,
@@ -142,14 +144,14 @@ class SqliteTaskRepository(TaskRepository):
                         ai_prompt_base_file, ai_prompt_criteria_file, account_state_file,
                         account_strategy, free_shipping, new_publish_option, region,
                         decision_mode, keyword_rules_json, required_keywords_json,
-                        optional_keywords_json, optional_min_hits, is_running
+                        optional_keywords_json, optional_min_hits, is_running, schedule_paused
                     ) VALUES (
                         :id, :task_name, :enabled, :keyword, :description, :analyze_images,
                         :max_pages, :personal_only, :min_price, :max_price, :cron,
                         :ai_prompt_base_file, :ai_prompt_criteria_file, :account_state_file,
                         :account_strategy, :free_shipping, :new_publish_option, :region,
                         :decision_mode, :keyword_rules_json, :required_keywords_json,
-                        :optional_keywords_json, :optional_min_hits, :is_running
+                        :optional_keywords_json, :optional_min_hits, :is_running, :schedule_paused
                     )
                     """,
                     payload,
@@ -178,6 +180,7 @@ class SqliteTaskRepository(TaskRepository):
         values["personal_only"] = int(task.personal_only)
         values["free_shipping"] = int(task.free_shipping)
         values["is_running"] = int(task.is_running)
+        values["schedule_paused"] = int(task.schedule_paused)
         values["keyword_rules_json"] = json.dumps(task.keyword_rules or [], ensure_ascii=False)
         values["required_keywords_json"] = json.dumps(task.required_keywords or [], ensure_ascii=False)
         values["optional_keywords_json"] = json.dumps(task.optional_keywords or [], ensure_ascii=False)

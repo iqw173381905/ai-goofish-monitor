@@ -133,6 +133,8 @@ class Task(BaseModel):
     optional_keywords: List[str] = Field(default_factory=list)
     optional_min_hits: Optional[int] = None
     is_running: bool = False
+    # 仅暂停定时触发（调度器跳过），不影响手动启动；与 enabled（整任务禁用）区分
+    schedule_paused: bool = False
     # AI 分析标准生成状态：生成中为 True；criteria_generated_at 记录最近一次生成完成时间；
     # criteria_generating_since 记录生成中的开始时间，用于识别 worker 卡死产生的 stale 标记
     criteria_generating: bool = False
@@ -261,6 +263,7 @@ class TaskUpdate(BaseModel):
     optional_keywords: Optional[List[str]] = None
     optional_min_hits: Optional[int] = None
     is_running: Optional[bool] = None
+    schedule_paused: Optional[bool] = None
     # 强制重新生成 AI 分析标准（即使 description 未变化也重新生成）
     regenerate_criteria: Optional[bool] = None
 

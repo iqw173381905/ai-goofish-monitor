@@ -46,7 +46,8 @@ SCHEMA_STATEMENTS = (
         required_keywords_json TEXT NOT NULL DEFAULT '[]',
         optional_keywords_json TEXT NOT NULL DEFAULT '[]',
         optional_min_hits INTEGER,
-        is_running INTEGER NOT NULL
+        is_running INTEGER NOT NULL,
+        schedule_paused INTEGER NOT NULL DEFAULT 0
     )
     """,
     """
@@ -163,6 +164,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _migrate_task_keyword_columns(conn)
     _migrate_task_criteria_status(conn)
     _migrate_task_criteria_since(conn)
+    _migrate_task_schedule_paused(conn)
     _migrate_ai_profiles_failover(conn)
     conn.commit()
 
@@ -244,6 +246,21 @@ def _migrate_task_criteria_since(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tasks ADD COLUMN criteria_generating_since TEXT")
     conn.execute(
         "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_criteria_since', 'done')"
+    )
+
+
+def _migrate_task_schedule_paused(conn: sqlite3.Connection) -> None:
+    """为 tasks 表添加 schedule_paused 列：仅暂停定时触发，不影响手动启动（仅执行一次，兼容旧库）。"""
+    row = conn.execute(
+        "SELECT value FROM app_metadata WHERE key = 'migration:task_schedule_paused'"
+    ).fetchone()
+    if row is not None:
+        return
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "schedule_paused" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN schedule_paused INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('migration:task_schedule_paused', 'done')"
     )
 
 

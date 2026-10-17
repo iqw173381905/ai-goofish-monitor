@@ -25,6 +25,7 @@ import {
   Layers,
   Loader2,
   MapPin,
+  Pause,
   RefreshCcw,
   Search,
   Eye
@@ -93,17 +94,19 @@ const resolveAccountName = (task: Task) => {
 const resolveCountdownText = (task: Task) => {
   if (!task.cron) return t('tasks.table.manualTrigger')
   if (!task.enabled) return t('tasks.table.disabled')
+  if (task.schedule_paused) return t('tasks.table.schedulePaused')
   return formatCountdown(task.next_run_at, nowMs.value) || t('tasks.table.waitingSchedule')
 }
 
 const resolveCountdownTone = (task: Task) => {
   if (!task.cron) return 'text-slate-400'
   if (!task.enabled) return 'text-slate-400'
+  if (task.schedule_paused) return 'text-slate-400'
   return 'text-amber-600'
 }
 
 const resolveNextRunLabel = (task: Task) => {
-  if (!task.cron || !task.enabled || !task.next_run_at) return null
+  if (!task.cron || !task.enabled || task.schedule_paused || !task.next_run_at) return null
   return formatNextRunAbsolute(task.next_run_at)
 }
 
@@ -115,6 +118,7 @@ const emit = defineEmits<{
   (e: 'refresh-criteria', task: Task): void
   (e: 'view-criteria', task: Task): void
   (e: 'toggle-enabled', task: Task, enabled: boolean): void
+  (e: 'toggle-schedule-paused', task: Task, paused: boolean): void
 }>()
 </script>
 
@@ -295,6 +299,19 @@ const emit = defineEmits<{
               <Square v-if="!isStopping(task.id)" class="mr-1 h-3.5 w-3.5 fill-current" />
               <RefreshCcw v-else class="mr-1 h-3.5 w-3.5 animate-spin" />
               {{ isStopping(task.id) ? t('tasks.table.stopping') : t('tasks.table.stop') }}
+            </Button>
+            <Button
+              v-if="task.cron"
+              size="sm"
+              variant="outline"
+              class="flex-1 min-w-[120px]"
+              :class="task.schedule_paused ? 'text-emerald-700 border-emerald-200 hover:bg-emerald-50' : 'text-amber-700 border-amber-200 hover:bg-amber-50'"
+              :aria-label="`${task.schedule_paused ? t('tasks.table.resumeSchedule') : t('tasks.table.pauseSchedule')} ${task.task_name}`"
+              @click="emit('toggle-schedule-paused', task, !task.schedule_paused)"
+            >
+              <Play v-if="task.schedule_paused" class="mr-1 h-3.5 w-3.5 fill-current" />
+              <Pause v-else class="mr-1 h-3.5 w-3.5 fill-current" />
+              {{ task.schedule_paused ? t('tasks.table.resumeSchedule') : t('tasks.table.pauseSchedule') }}
             </Button>
             <Button
               size="icon"
@@ -509,6 +526,20 @@ const emit = defineEmits<{
                 <div class="flex items-center gap-1 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                   <Layers class="w-3 h-3 opacity-50" /> {{ task.max_pages || 3 }}P
                 </div>
+                <Button
+                  v-if="task.cron"
+                  size="sm"
+                  variant="ghost"
+                  class="h-6 text-[9px] font-black uppercase tracking-widest px-2"
+                  :class="task.schedule_paused ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50'"
+                  :aria-label="`${task.schedule_paused ? t('tasks.table.resumeSchedule') : t('tasks.table.pauseSchedule')} ${task.task_name}`"
+                  :title="`${task.schedule_paused ? t('tasks.table.resumeSchedule') : t('tasks.table.pauseSchedule')}`"
+                  @click="emit('toggle-schedule-paused', task, !task.schedule_paused)"
+                >
+                  <Play v-if="task.schedule_paused" class="w-2.5 h-2.5 mr-1 fill-current" />
+                  <Pause v-else class="w-2.5 h-2.5 mr-1 fill-current" />
+                  {{ task.schedule_paused ? t('tasks.table.resumeSchedule') : t('tasks.table.pauseSchedule') }}
+                </Button>
               </div>
             </TableCell>
 

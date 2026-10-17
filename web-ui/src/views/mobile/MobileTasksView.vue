@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { Play, Square, RefreshCcw, Loader2, Pencil, X, BrainCircuit, Clock, Plus } from 'lucide-vue-next'
+import { Play, Square, RefreshCcw, Loader2, Pencil, X, BrainCircuit, Clock, Plus, Pause } from 'lucide-vue-next'
 import { useTasks } from '@/composables/useTasks'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toast'
@@ -96,6 +96,24 @@ async function handleToggle(task: any) {
   }
 }
 
+async function handleToggleSchedulePaused(task: any) {
+  const paused = !task.schedule_paused
+  const previous = task.schedule_paused
+  task.schedule_paused = paused
+  try {
+    await updateTask(task.id, { schedule_paused: paused })
+    toast({ title: paused ? '定时已暂停' : '定时已恢复' })
+    await fetchTasks()
+  } catch (e) {
+    task.schedule_paused = previous
+    toast({
+      title: '暂停/恢复定时失败',
+      description: (e as Error).message,
+      variant: 'destructive',
+    })
+  }
+}
+
 function isKeywordMode(task: any) {
   return task.decision_mode === 'keyword'
 }
@@ -175,6 +193,7 @@ async function submitCriteria() {
 function statusText(task: any) {
   if (task.is_running) return '运行中'
   if (!task.enabled) return '已禁用'
+  if (task.schedule_paused) return '定时暂停'
   return '待机'
 }
 
@@ -186,6 +205,7 @@ function statusClass(task: any) {
 
 function scheduleText(task: any) {
   if (!task.cron) return '手动触发'
+  if (task.schedule_paused) return '定时已暂停'
   const cd = formatCountdown(task.next_run_at, nowMs.value)
   if (cd) return `下次 ${cd}`
   const abs = formatNextRunAbsolute(task.next_run_at)
@@ -295,6 +315,18 @@ function scheduleText(task: any) {
           <Loader2 v-if="stoppingTaskIds.has(task.id)" class="mr-2 h-5 w-5 animate-spin" />
           <Square v-else class="mr-2 h-5 w-5 fill-current" />
           {{ stoppingTaskIds.has(task.id) ? '停止中…' : '停止任务' }}
+        </Button>
+        <!-- 暂停 / 恢复定时 -->
+        <Button
+          v-if="task.cron"
+          variant="outline"
+          class="w-full h-10 text-sm"
+          :class="task.schedule_paused ? 'text-emerald-700 border-emerald-200' : 'text-amber-700 border-amber-200'"
+          @click="handleToggleSchedulePaused(task)"
+        >
+          <Play v-if="task.schedule_paused" class="mr-2 h-4 w-4 fill-current" />
+          <Pause v-else class="mr-2 h-4 w-4 fill-current" />
+          {{ task.schedule_paused ? '恢复定时' : '暂停定时' }}
         </Button>
         <!-- AI 标准重新生成 -->
         <Button

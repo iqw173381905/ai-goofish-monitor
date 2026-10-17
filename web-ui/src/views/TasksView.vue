@@ -325,6 +325,21 @@ async function handleToggleEnabled(task: Task, enabled: boolean) {
   }
 }
 
+async function handleToggleSchedulePaused(task: Task, paused: boolean) {
+  const previous = task.schedule_paused
+  task.schedule_paused = paused
+  try {
+    await updateTask(task.id, { schedule_paused: paused })
+  } catch (e) {
+    task.schedule_paused = previous
+    toast({
+      title: t('tasks.toasts.schedulePauseFailed'),
+      description: (e as Error).message,
+      variant: 'destructive',
+    })
+  }
+}
+
 async function fetchAccountOptions() {
   try {
     accountOptions.value = await listAccounts()
@@ -448,6 +463,7 @@ onMounted(fetchAccountOptions)
       @refresh-criteria="handleOpenCriteriaDialog"
       @view-criteria="handleViewCriteria"
       @toggle-enabled="handleToggleEnabled"
+      @toggle-schedule-paused="handleToggleSchedulePaused"
     />
 
     <Dialog v-model:open="isDeleteDialogOpen">

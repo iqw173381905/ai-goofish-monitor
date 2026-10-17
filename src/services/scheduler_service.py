@@ -56,7 +56,8 @@ class SchedulerService:
         self.scheduler.remove_all_jobs()
 
         for task in tasks:
-            if task.enabled and task.cron:
+            # schedule_paused 只暂停定时触发，不影响手动启动；enabled=False 才是整任务禁用
+            if task.enabled and task.cron and not task.schedule_paused:
                 try:
                     trigger = build_cron_trigger(
                         task.cron,
@@ -78,6 +79,18 @@ class SchedulerService:
 
     async def _run_task(self, task_id: int, task_name: str):
         """执行定时任务"""
+        # 定时暂停检查：用户点了暂停后即使 job 尚未重载也跳过本轮
+        try:
+            with sqlite_connection() as conn:
+                row = conn.execute(
+                    "SELECT schedule_paused FROM tasks WHERE id = ?",
+                    (task_id,),
+                ).fetchone()
+            if row and bool(row[0]):
+                print(f"定时任务跳过: 任务 '{task_name}' 的定时已暂停，本轮不启动")
+                return
+        except Exception as e:
+            print(f"检查定时暂停状态失败 task={task_id}，继续执行: {e}")
         # AI 标准生成中时跳过本次定时触发，避免用旧标准跑任务。
         # stale 判定与手动启动保持一致：超过 10 分钟视为 worker 卡死，放行。
         try:

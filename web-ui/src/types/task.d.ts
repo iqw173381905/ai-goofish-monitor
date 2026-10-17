@@ -26,6 +26,8 @@ export interface Task {
   optional_keywords: string[];
   optional_min_hits: number | null;
   is_running: boolean;
+  // 仅暂停定时触发，不影响手动启动
+  schedule_paused: boolean;
   // AI 分析标准生成状态：生成中为 true；criteria_generated_at 为最近生成完成时间
   criteria_generating?: boolean;
   criteria_generated_at?: string | null;

@@ -15,6 +15,7 @@ const enUSExtra = {
       startFailed: 'Failed to start task.',
       stopFailed: 'Failed to stop task.',
       toggleFailed: 'Failed to update status.',
+      schedulePauseFailed: 'Failed to pause/resume schedule.',
       loadAccountsFailed: 'Failed to load account list.',
       notFound: 'Task to delete was not found.',
       progressFailed: 'Failed to fetch task progress.',
@@ -154,6 +155,9 @@ const enUSExtra = {
       start: 'Start',
       stop: 'Stop',
       stopping: 'Stopping...',
+      pauseSchedule: 'Pause schedule',
+      resumeSchedule: 'Resume schedule',
+      schedulePaused: 'Schedule paused',
     },
   },
   rotation: {

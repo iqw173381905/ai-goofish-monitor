@@ -15,6 +15,7 @@ const zhCNExtra = {
       startFailed: '启动任务失败',
       stopFailed: '停止任务失败',
       toggleFailed: '更新状态失败',
+      schedulePauseFailed: '暂停/恢复定时失败',
       loadAccountsFailed: '加载账号列表失败',
       notFound: '未找到要删除的任务',
       progressFailed: '任务进度获取失败',
@@ -154,6 +155,9 @@ const zhCNExtra = {
       start: '启动',
       stop: '停止',
       stopping: '停止中',
+      pauseSchedule: '暂停定时',
+      resumeSchedule: '恢复定时',
+      schedulePaused: '定时已暂停',
     },
   },
   rotation: {
