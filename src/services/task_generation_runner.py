@@ -160,13 +160,13 @@ async def run_ai_generation_job(
 
         if not _finalize_task_criteria(task_id, output_filename):
             raise RuntimeError("回填任务分析标准失败")
-        if kw_required or kw_optional:
+        if kw_optional:
             import json as _json
             with sqlite_connection() as conn:
+                # 必含关键词由用户自己维护，生成流程只写可选关键词
                 conn.execute(
-                    "UPDATE tasks SET required_keywords_json = ?, optional_keywords_json = ? WHERE id = ?",
-                    (_json.dumps(kw_required, ensure_ascii=False),
-                     _json.dumps(kw_optional, ensure_ascii=False),
+                    "UPDATE tasks SET optional_keywords_json = ? WHERE id = ?",
+                    (_json.dumps(kw_optional, ensure_ascii=False),
                      task_id),
                 )
                 conn.commit()

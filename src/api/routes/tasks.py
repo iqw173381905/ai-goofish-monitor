@@ -148,11 +148,11 @@ def _regenerate_criteria_in_background(
             for attempt in range(3):
                 try:
                     with sqlite_connection() as conn:
+                        # 必含关键词由用户自己维护：重新生成只刷新分析标准与可选关键词，不覆盖必含
                         conn.execute(
-                            "UPDATE tasks SET ai_prompt_criteria_file = ?, required_keywords_json = ?, optional_keywords_json = ?, criteria_generating = 0, criteria_generating_since = NULL, criteria_generated_at = ? WHERE id = ?",
+                            "UPDATE tasks SET ai_prompt_criteria_file = ?, optional_keywords_json = ?, criteria_generating = 0, criteria_generating_since = NULL, criteria_generated_at = ? WHERE id = ?",
                             (
                                 output_filename,
-                                _json.dumps(kw_required, ensure_ascii=False),
                                 _json.dumps(kw_optional, ensure_ascii=False),
                                 datetime.now().isoformat(timespec="seconds"),
                                 task_id,
