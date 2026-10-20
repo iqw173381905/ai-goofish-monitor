@@ -138,7 +138,7 @@ def _regenerate_criteria_in_background(
         import json as _json
         criteria_text, kw_required, kw_optional = split_criteria_and_keywords(generated)
         if kw_required or kw_optional:
-            print(f"[后台] AI 生成关键词：必填 {kw_required}，可选 {kw_optional}")
+            print(f"[后台] AI 生成关键词：可选 {kw_optional}（必含不生成，留空待用户填写）")
         try:
             os.makedirs("prompts", exist_ok=True)
             with open(output_filename, 'w', encoding='utf-8') as f:

@@ -148,7 +148,7 @@ async def run_ai_generation_job(
         # 分离标准文本与 AI 生成的关键词，关键词回填到任务
         generated_criteria, kw_required, kw_optional = split_criteria_and_keywords(generated_raw)
         if kw_required or kw_optional:
-            print(f"[任务生成] AI 生成关键词：必填 {kw_required}，可选 {kw_optional}")
+            print(f"[任务生成] AI 生成关键词：可选 {kw_optional}（必含不生成，留空待用户填写）")
 
         await advance_job(
             generation_service,

@@ -202,3 +202,35 @@ def test_generate_criteria_falls_back_to_legacy_when_chain_empty(monkeypatch, tm
         prompt_utils.generate_criteria("need a watch", str(reference_file))
     )
     assert result == "legacy criteria"
+
+
+def test_split_keywords_drops_required_and_keeps_optional():
+    """必含关键词不由 AI 生成：REQUIRED 段写了也丢弃；可选正常解析。"""
+    text = (
+        "标准正文\n"
+        "[KEYWORDS_REQUIRED]\n"
+        "Apple Watch\nSeries 3\n"
+        "[KEYWORDS_OPTIONAL]\n"
+        "蜂窝版\n国行\n42mm\n表带齐全\n无拆修\n续航好\n"
+        "[END]\n"
+    )
+    criteria, required, optional = prompt_utils.split_criteria_and_keywords(text)
+    assert criteria == "标准正文"
+    assert required == []
+    assert optional == ["蜂窝版", "国行", "42mm", "表带齐全", "无拆修", "续航好"]
+
+
+def test_split_keywords_optional_only_marker_and_dedup():
+    """只有 OPTIONAL 标记时也能解析，且可选关键词去重保序。"""
+    text = "正文\n[KEYWORDS_OPTIONAL]\n国行\n国行\n 蜂窝 \n[END]"
+    criteria, required, optional = prompt_utils.split_criteria_and_keywords(text)
+    assert criteria == "正文"
+    assert required == []
+    assert optional == ["国行", "蜂窝"]
+
+
+def test_split_keywords_no_markers_returns_text_unchanged():
+    criteria, required, optional = prompt_utils.split_criteria_and_keywords("纯标准文本")
+    assert criteria == "纯标准文本"
+    assert required == []
+    assert optional == []

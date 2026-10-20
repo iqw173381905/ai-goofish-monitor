@@ -38,9 +38,9 @@ META_PROMPT_TEMPLATE = """
 【第二部分：关键词】
 在分析标准文本结束后，另起一行输出以下三行标记（标记行本身保留）：
 [KEYWORDS_REQUIRED]
-每行一个必填关键词（商品标题/描述必须包含的词，如品牌、型号、关键规格），没有则留空
+必须留空，不要写任何关键词（必含关键词由用户自己填写，AI 不负责生成）
 [KEYWORDS_OPTIONAL]
-每行一个可选关键词（加分项，如成色、配件、版本特征），没有则留空
+每行一个可选关键词（与目标商品强相关的加分项，如型号变体、关键规格、版本、成色、配件特征），至少生成 5 条，不要凑数写无关词
 [END]
 """
 
@@ -208,31 +208,41 @@ def split_criteria_and_keywords(generated_text: str):
     返回 (criteria_text, required_keywords, optional_keywords)。
     关键词段格式：
         [KEYWORDS_REQUIRED]
-        每行一个
+        （留空）
         [KEYWORDS_OPTIONAL]
         每行一个
         [END]
+
+    约定（用户 2026-10-21 定）：必含关键词不由 AI 生成，留给用户自己填，
+    因此 REQUIRED 段即使被模型写了内容也一律丢弃，必含恒返回 []；
+    可选关键词至少 5 条由元提示词约束，这里只做清洗与去重。
     """
     text = generated_text or ""
-    required: list[str] = []
     optional: list[str] = []
     criteria = text
     req_marker = "[KEYWORDS_REQUIRED]"
     opt_marker = "[KEYWORDS_OPTIONAL]"
     end_marker = "[END]"
-    if req_marker in text:
-        criteria, rest = text.split(req_marker, 1)
-        criteria = criteria.strip()
-        # rest 中 optional 部分
+    # 分析标准正文在第一个关键词标记处结束
+    cut = len(text)
+    for marker in (req_marker, opt_marker):
+        idx = text.find(marker)
+        if idx != -1:
+            cut = min(cut, idx)
+    if cut < len(text):
+        criteria = text[:cut].strip()
+        rest = text[cut:]
         if opt_marker in rest:
-            req_part, rest2 = rest.split(opt_marker, 1)
-            opt_part = rest2.split(end_marker, 1)[0] if end_marker in rest2 else rest2
-        else:
-            req_part = rest.split(end_marker, 1)[0] if end_marker in rest else rest
-            opt_part = ""
-        required = [ln.strip() for ln in req_part.strip().splitlines() if ln.strip()]
-        optional = [ln.strip() for ln in opt_part.strip().splitlines() if ln.strip()]
-    return criteria, required, optional
+            opt_part = rest.split(opt_marker, 1)[1]
+            if end_marker in opt_part:
+                opt_part = opt_part.split(end_marker, 1)[0]
+            seen: set[str] = set()
+            for ln in opt_part.strip().splitlines():
+                kw = ln.strip()
+                if kw and kw not in seen:
+                    seen.add(kw)
+                    optional.append(kw)
+    return criteria, [], optional
 
 
 async def generate_criteria(
