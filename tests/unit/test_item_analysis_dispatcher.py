@@ -129,3 +129,90 @@ def test_item_analysis_dispatcher_supports_keyword_mode_without_ai():
     asyncio.run(run())
     assert saved_records[0]["ai_analysis"]["analysis_source"] == "keyword"
     assert saved_records[0]["ai_analysis"]["is_recommended"] is True
+
+
+def _run_single_item_job(*, title: str, ai_recommended: bool):
+    """跑一个单商品任务，返回最终保存的记录列表与通知列表。"""
+    saved_records = []
+    notifications = []
+
+    async def seller_loader(user_id: str):
+        return {}
+
+    async def image_downloader(product_id: str, image_urls: list[str], task_name: str):
+        return []
+
+    async def ai_analyzer(record: dict, image_paths: list[str], prompt_text: str, image_urls=None):
+        return {
+            "analysis_source": "ai",
+            "is_recommended": ai_recommended,
+            "reason": "AI 认为值得推荐",
+            "value_score": 85,
+        }
+
+    async def notifier(item_data: dict, reason: str):
+        notifications.append((item_data["商品ID"], reason))
+
+    async def saver(record: dict, keyword: str):
+        saved_records.append(record)
+        return True
+
+    async def run():
+        dispatcher = ItemAnalysisDispatcher(
+            concurrency=1,
+            skip_ai_analysis=False,
+            seller_loader=seller_loader,
+            image_downloader=image_downloader,
+            ai_analyzer=ai_analyzer,
+            notifier=notifier,
+            saver=saver,
+        )
+        dispatcher.submit(
+            ItemAnalysisJob(
+                keyword="s3蜂窝国行",
+                task_name="s3蜂窝国行",
+                decision_mode="ai",
+                analyze_images=False,
+                prompt_text="prompt",
+                keyword_rules=(),
+                optional_keywords=("Apple Watch Series 3", "蜂窝版", "A1892", "国行", "42mm"),
+                optional_min_hits=3,
+                final_record={
+                    "商品信息": {"商品ID": "1", "商品标题": title, "商品图片列表": []},
+                    "卖家信息": {},
+                },
+                seller_id="seller-1",
+            )
+        )
+        await dispatcher.join()
+
+    asyncio.run(run())
+    return saved_records, notifications
+
+
+def test_zero_keyword_hits_block_ai_recommendation():
+    # 标题与任务关键词毫无关联（搜索污染，如汽车中网混进手表任务）：
+    # 即使 AI 给出推荐，零命中兜底也必须拦截，且不发通知
+    saved_records, notifications = _run_single_item_job(
+        title="奥迪A3L原装前中网，适配21-23款车型，蜂窝格栅设计",
+        ai_recommended=True,
+    )
+    final = saved_records[-1]["ai_analysis"]
+    assert final["analysis_source"] == "ai"
+    assert final["keyword_hit_count"] == 0
+    assert final["is_recommended"] is False
+    assert "系统兜底" in final["reason"]
+    assert notifications == []
+
+
+def test_keyword_hits_keep_ai_recommendation_and_backfill_hit_count():
+    # 命中关键词的正常商品：AI 推荐保留，且真实命中数回填进 AI 结果
+    saved_records, notifications = _run_single_item_job(
+        title="苹果手表S3 42mm 国行蜂窝版 A1892 功能正常",
+        ai_recommended=True,
+    )
+    final = saved_records[-1]["ai_analysis"]
+    assert final["analysis_source"] == "ai"
+    assert final["keyword_hit_count"] >= 3
+    assert final["is_recommended"] is True
+    assert len(notifications) == 1

@@ -65,17 +65,24 @@ async def notify_new_recommendations(task_id: int) -> int:
     try:
         with sqlite_connection() as conn:
             rows = conn.execute(
-                "SELECT link_unique_key, title, price, reason, crawl_time FROM result_items "
+                "SELECT link_unique_key, title, price, raw_json, crawl_time FROM result_items "
                 "WHERE result_filename = ? AND is_recommended = 1 AND crawl_time > ? "
                 "ORDER BY crawl_time ASC",
                 (filename, last_time),
             ).fetchall()
             for r in rows:
+                # result_items 没有 reason 列，推荐理由在 raw_json 的 ai_analysis 里
+                reason = ""
+                try:
+                    raw = json.loads(r[3] or "{}")
+                    reason = (raw.get("ai_analysis") or {}).get("reason") or ""
+                except Exception:
+                    reason = ""
                 items.append({
                     "id": r[0],
                     "title": r[1] or "",
                     "price": r[2] or "",
-                    "reason": r[3] or "",
+                    "reason": reason,
                     "crawl_time": r[4] or "",
                 })
     except Exception as e:

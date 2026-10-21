@@ -92,6 +92,25 @@ class ItemAnalysisDispatcher:
         # AI 判断（跳过重复的关键词预检）
         ai_result = await self._build_analysis_result(job, record, skip_prefilter=True)
         if ai_result.get("analysis_source") == "ai" and "error" not in ai_result:
+            if keyword_result is not None:
+                # AI 结果默认不带关键词命中数，落库时一直记 0；用关键词阶段的真实命中数回填
+                hit_count = keyword_result.get("keyword_hit_count", 0)
+                ai_result["keyword_hit_count"] = hit_count
+                # 零命中兜底：关键词一个都没命中时，商品与任务需求毫无文本关联
+                # （多为搜索污染，如搜手表混入汽车配件），AI 的推荐一律拦截
+                if (
+                    not self._skip_ai_analysis
+                    and hit_count == 0
+                    and ai_result.get("is_recommended")
+                ):
+                    ai_result["is_recommended"] = False
+                    ai_result["value_score"] = 0
+                    reason = (ai_result.get("reason") or "").strip()
+                    guard_note = "系统兜底：关键词零命中，拦截 AI 推荐。"
+                    ai_result["reason"] = (
+                        f"{reason}（{guard_note}）" if reason else guard_note
+                    )
+                    print("   [兜底] 关键词零命中，已拦截 AI 的推荐结论")
             # AI 成功：替换关键词结果
             print("   [AI] 分析成功，已替换关键词判断结果")
             record["ai_analysis"] = ai_result
